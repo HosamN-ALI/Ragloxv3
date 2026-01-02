@@ -349,12 +349,12 @@ Respond with JSON only:
         ]
         
         # Make the API call
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         print_ai("Sending request to AI...")
         
         response = await provider.generate_json(messages)
         
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         latency = (end_time - start_time).total_seconds() * 1000
         
         # Get cost stats
