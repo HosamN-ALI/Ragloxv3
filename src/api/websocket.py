@@ -357,3 +357,110 @@ async def broadcast_statistics(
         "data": stats,
         "timestamp": datetime.utcnow().isoformat()
     })
+
+
+# ═══════════════════════════════════════════════════════════════
+# HITL (Human-in-the-Loop) Event Broadcasting
+# ═══════════════════════════════════════════════════════════════
+
+async def broadcast_approval_request(
+    mission_id: str,
+    action_id: str,
+    action_type: str,
+    action_description: str,
+    target_ip: str = None,
+    target_hostname: str = None,
+    risk_level: str = "medium",
+    risk_reasons: list = None,
+    potential_impact: str = None,
+    command_preview: str = None,
+    expires_at: str = None
+) -> None:
+    """
+    Broadcast approval request event to frontend.
+    
+    This notifies connected clients that user approval is required
+    for a high-risk action.
+    """
+    await manager.broadcast_to_mission(mission_id, {
+        "type": "approval_request",
+        "mission_id": mission_id,
+        "data": {
+            "action_id": action_id,
+            "action_type": action_type,
+            "action_description": action_description,
+            "target_ip": target_ip,
+            "target_hostname": target_hostname,
+            "risk_level": risk_level,
+            "risk_reasons": risk_reasons or [],
+            "potential_impact": potential_impact,
+            "command_preview": command_preview,
+            "expires_at": expires_at
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+    
+    # Also broadcast globally for dashboard notifications
+    await manager.broadcast_global({
+        "type": "approval_request",
+        "mission_id": mission_id,
+        "data": {
+            "action_id": action_id,
+            "action_type": action_type,
+            "action_description": action_description,
+            "risk_level": risk_level
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+async def broadcast_approval_response(
+    mission_id: str,
+    action_id: str,
+    approved: bool,
+    rejection_reason: str = None,
+    user_comment: str = None
+) -> None:
+    """
+    Broadcast approval response event.
+    
+    Notifies clients that an approval decision has been made.
+    """
+    await manager.broadcast_to_mission(mission_id, {
+        "type": "approval_response",
+        "mission_id": mission_id,
+        "data": {
+            "action_id": action_id,
+            "approved": approved,
+            "rejection_reason": rejection_reason,
+            "user_comment": user_comment
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+async def broadcast_chat_message(
+    mission_id: str,
+    message_id: str,
+    role: str,
+    content: str,
+    related_task_id: str = None,
+    related_action_id: str = None
+) -> None:
+    """
+    Broadcast chat message event.
+    
+    Used for human-system interactive communication.
+    """
+    await manager.broadcast_to_mission(mission_id, {
+        "type": "chat_message",
+        "mission_id": mission_id,
+        "data": {
+            "message_id": message_id,
+            "role": role,
+            "content": content,
+            "related_task_id": related_task_id,
+            "related_action_id": related_action_id
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })

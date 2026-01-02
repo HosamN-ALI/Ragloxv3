@@ -30,7 +30,7 @@ class TestEnums:
     
     def test_mission_status_values(self):
         """Test MissionStatus enum has all required values."""
-        expected = {'created', 'starting', 'running', 'paused', 
+        expected = {'created', 'starting', 'running', 'paused', 'waiting_for_approval',
                    'completing', 'completed', 'failed', 'cancelled', 'archived'}
         actual = {status.value for status in MissionStatus}
         assert actual == expected, f"Missing statuses: {expected - actual}"

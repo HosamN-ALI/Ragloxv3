@@ -21,6 +21,7 @@ class MissionStatus(str, Enum):
     STARTING = "starting"
     RUNNING = "running"
     PAUSED = "paused"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"  # HITL: Waiting for user approval
     COMPLETING = "completing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -592,3 +593,146 @@ class ControlEvent(BaseModel):
     command: str  # pause, resume, stop
     mission_id: Optional[UUID] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════
+# HITL (Human-in-the-Loop) Models
+# ═══════════════════════════════════════════════════════════════
+
+class RiskLevel(str, Enum):
+    """Risk level for operations requiring approval."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class ApprovalStatus(str, Enum):
+    """Approval request status."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+class ActionType(str, Enum):
+    """Types of actions that may require approval."""
+    EXPLOIT = "exploit"           # Exploitation attempt
+    WRITE_OPERATION = "write"     # File/system writes
+    LATERAL_MOVEMENT = "lateral"  # Moving to other targets
+    PRIVILEGE_ESCALATION = "privesc"  # Privilege escalation
+    DATA_EXFILTRATION = "exfil"   # Data extraction
+    PERSISTENCE = "persistence"   # Installing persistence
+    DESTRUCTIVE = "destructive"   # Potentially destructive action
+
+
+class ApprovalAction(BaseEntity):
+    """
+    Action awaiting approval from user.
+    
+    When AnalysisSpecialist determines an action is HIGH_RISK or involves
+    sensitive operations, it creates an ApprovalAction and waits for
+    user consent before proceeding.
+    """
+    mission_id: UUID
+    task_id: Optional[UUID] = None
+    
+    # Action details
+    action_type: ActionType
+    action_description: str
+    target_ip: Optional[str] = None
+    target_hostname: Optional[str] = None
+    
+    # Risk assessment
+    risk_level: RiskLevel = RiskLevel.MEDIUM
+    risk_reasons: List[str] = Field(default_factory=list)
+    potential_impact: Optional[str] = None
+    
+    # What will be executed
+    module_to_execute: Optional[str] = None
+    command_preview: Optional[str] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Status
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    requested_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: Optional[datetime] = None
+    
+    # Response
+    responded_at: Optional[datetime] = None
+    responded_by: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    user_comment: Optional[str] = None
+
+
+class ApprovalRequestEvent(BlackboardEvent):
+    """
+    Event when system requests user approval for a high-risk action.
+    
+    This event is broadcast via WebSocket to the frontend, which should
+    display an approval dialog to the user.
+    """
+    event: str = "approval_request"
+    action_id: UUID
+    action_type: ActionType
+    action_description: str
+    
+    # Target info
+    target_ip: Optional[str] = None
+    target_hostname: Optional[str] = None
+    
+    # Risk info
+    risk_level: RiskLevel
+    risk_reasons: List[str] = Field(default_factory=list)
+    potential_impact: Optional[str] = None
+    
+    # Preview
+    command_preview: Optional[str] = None
+    
+    # Timing
+    expires_at: Optional[datetime] = None
+
+
+class ApprovalResponseEvent(BlackboardEvent):
+    """
+    Event when user responds to an approval request.
+    """
+    event: str = "approval_response"
+    action_id: UUID
+    approved: bool
+    rejection_reason: Optional[str] = None
+    user_comment: Optional[str] = None
+
+
+class ChatMessage(BaseModel):
+    """
+    Chat message for human-system interaction.
+    
+    Allows users to send instructions or ask questions about the mission.
+    """
+    id: UUID = Field(default_factory=uuid4)
+    mission_id: UUID
+    
+    # Message content
+    role: str = "user"  # user, system, assistant
+    content: str
+    
+    # Context
+    related_task_id: Optional[UUID] = None
+    related_action_id: Optional[UUID] = None
+    
+    # Timestamp
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Optional metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatEvent(BlackboardEvent):
+    """Event for chat messages."""
+    event: str = "chat_message"
+    message_id: UUID
+    role: str
+    content: str
+    related_task_id: Optional[UUID] = None
+    related_action_id: Optional[UUID] = None

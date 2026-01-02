@@ -21,6 +21,7 @@ class DecisionType(str, Enum):
     SKIP = "skip"                      # Skip this task
     ESCALATE = "escalate"              # Escalate for human review
     PIVOT = "pivot"                    # Change attack vector entirely
+    ASK_APPROVAL = "ask_approval"      # HITL: Request user approval for high-risk action
 
 
 class ConfidenceLevel(str, Enum):
@@ -211,6 +212,28 @@ class RecommendedAction(BaseModel):
     human_guidance_needed: List[str] = Field(
         default_factory=list,
         description="Specific guidance needed from human"
+    )
+    
+    # For ASK_APPROVAL (HITL)
+    requires_approval: bool = Field(
+        False,
+        description="Whether this action requires user approval"
+    )
+    approval_reason: Optional[str] = Field(
+        None,
+        description="Why approval is needed"
+    )
+    risk_level: Optional[str] = Field(
+        None,
+        description="Risk level (low/medium/high/critical)"
+    )
+    potential_impact: Optional[str] = Field(
+        None,
+        description="Potential impact of the action"
+    )
+    action_preview: Optional[str] = Field(
+        None,
+        description="Preview of what will be executed"
     )
 
 

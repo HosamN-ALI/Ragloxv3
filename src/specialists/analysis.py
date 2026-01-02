@@ -8,14 +8,17 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from .base import BaseSpecialist
 from ..core.models import (
     TaskType, SpecialistType, TaskStatus, Severity, Priority,
     Task, ErrorContext, ExecutionLog,
     TaskFailedEvent, TaskAnalysisRequestEvent, TaskAnalysisResultEvent,
-    BlackboardEvent
+    BlackboardEvent,
+    # HITL Models
+    ApprovalAction, ApprovalStatus, ApprovalRequestEvent,
+    ActionType, RiskLevel
 )
 from ..core.blackboard import Blackboard
 from ..core.config import Settings, get_settings
@@ -261,6 +264,13 @@ class AnalysisSpecialist(BaseSpecialist):
                 "max_cost_limit_usd": self._settings.llm_max_cost_limit,
             }
         }
+    
+    def _safe_uuid(self, value: str) -> UUID:
+        """Safely convert a string to UUID, generating new one if invalid."""
+        try:
+            return UUID(value) if value and len(value) == 36 else uuid4()
+        except (ValueError, TypeError):
+            return uuid4()
     
     async def _ensure_llm_service(self) -> Optional["LLMService"]:
         """
@@ -572,7 +582,18 @@ class AnalysisSpecialist(BaseSpecialist):
         - modify_approach: Retry with different parameters/module
         - skip: Skip this task and move on
         - escalate: Escalate for human/LLM review
+        - ask_approval: HITL - Request user approval for high-risk action
         """
+        # ═══════════════════════════════════════════════════════════
+        # HITL: Check if this is a high-risk action requiring approval
+        # ═══════════════════════════════════════════════════════════
+        is_high_risk, risk_reason, risk_level = self._is_high_risk_action(original_task, context)
+        if is_high_risk:
+            self.logger.warning(f"⚠️ High-risk action detected: {risk_reason}")
+            return await self._create_approval_request(
+                original_task, context, risk_reason, risk_level
+            )
+        
         # Check if LLM analysis is available and needed
         if self.llm_enabled and self._needs_llm_analysis(category, context):
             return await self._llm_decision(
@@ -683,6 +704,143 @@ class AnalysisSpecialist(BaseSpecialist):
             return True
         
         return False
+    
+    def _is_high_risk_action(self, task: Dict[str, Any], context: Dict[str, Any]) -> tuple[bool, str, RiskLevel]:
+        """
+        Determine if an action is high-risk and requires user approval.
+        
+        HITL: This is used to identify actions that should trigger ASK_APPROVAL.
+        
+        Returns:
+            Tuple of (is_high_risk, reason, risk_level)
+        """
+        task_type = task.get("type", "")
+        module = task.get("rx_module", "") or ""
+        
+        # Critical risk: Destructive operations
+        destructive_modules = [
+            "delete", "wipe", "destroy", "format", "ransom",
+            "rm -rf", "diskpart", "fdisk"
+        ]
+        if any(d in module.lower() for d in destructive_modules):
+            return True, "Potentially destructive operation", RiskLevel.CRITICAL
+        
+        # High risk: Persistence mechanisms
+        persistence_modules = [
+            "persistence", "backdoor", "rootkit", "scheduled_task",
+            "registry", "startup", "service"
+        ]
+        if any(p in module.lower() for p in persistence_modules):
+            return True, "Installing persistence mechanism", RiskLevel.HIGH
+        
+        # High risk: Privilege escalation to SYSTEM/root
+        if task_type == "privesc":
+            return True, "Privilege escalation attempt", RiskLevel.HIGH
+        
+        # High risk: Data exfiltration
+        exfil_modules = [
+            "exfil", "upload", "transfer", "extract", "dump",
+            "copy_data", "steal"
+        ]
+        if any(e in module.lower() for e in exfil_modules):
+            return True, "Data extraction/exfiltration", RiskLevel.HIGH
+        
+        # Medium risk: Lateral movement
+        if task_type == "lateral":
+            return True, "Lateral movement to new target", RiskLevel.MEDIUM
+        
+        # Medium risk: Write operations on target
+        write_modules = [
+            "write", "create", "modify", "change", "edit",
+            "append", "patch"
+        ]
+        if any(w in module.lower() for w in write_modules):
+            return True, "Write operation on target system", RiskLevel.MEDIUM
+        
+        # Not high-risk
+        return False, "", RiskLevel.LOW
+    
+    async def _create_approval_request(
+        self,
+        original_task: Dict[str, Any],
+        context: Dict[str, Any],
+        risk_reason: str,
+        risk_level: RiskLevel
+    ) -> Dict[str, Any]:
+        """
+        Create an approval request for a high-risk action.
+        
+        This is the HITL integration point where we pause execution
+        and wait for user consent.
+        """
+        self.logger.info(f"🔐 Creating approval request: {risk_reason}")
+        
+        # Determine action type from task
+        task_type = original_task.get("type", "")
+        if "exploit" in task_type.lower():
+            action_type = ActionType.EXPLOIT
+        elif "lateral" in task_type.lower():
+            action_type = ActionType.LATERAL_MOVEMENT
+        elif "privesc" in task_type.lower():
+            action_type = ActionType.PRIVILEGE_ESCALATION
+        elif "persistence" in task_type.lower():
+            action_type = ActionType.PERSISTENCE
+        else:
+            action_type = ActionType.WRITE_OPERATION
+        
+        # Get target info
+        target_info = context.get("target_info") or {}
+        
+        # Create approval action
+        approval_action = ApprovalAction(
+            mission_id=self._safe_uuid(self._current_mission_id) if self._current_mission_id else uuid4(),
+            task_id=self._safe_uuid(original_task["id"].replace("task:", "")) if original_task.get("id") else None,
+            action_type=action_type,
+            action_description=f"{task_type}: {risk_reason}",
+            target_ip=target_info.get("ip"),
+            target_hostname=target_info.get("hostname"),
+            risk_level=risk_level,
+            risk_reasons=[risk_reason],
+            potential_impact=f"This action may {risk_reason.lower()}. Please review before proceeding.",
+            module_to_execute=original_task.get("rx_module"),
+            command_preview=original_task.get("result_data", {}).get("command_preview"),
+            parameters=original_task.get("result_data", {})
+        )
+        
+        # Publish approval request event
+        if self.blackboard and self._current_mission_id:
+            event = ApprovalRequestEvent(
+                mission_id=self._safe_uuid(self._current_mission_id),
+                action_id=approval_action.id,
+                action_type=action_type,
+                action_description=approval_action.action_description,
+                target_ip=approval_action.target_ip,
+                target_hostname=approval_action.target_hostname,
+                risk_level=risk_level,
+                risk_reasons=approval_action.risk_reasons,
+                potential_impact=approval_action.potential_impact,
+                command_preview=approval_action.command_preview
+            )
+            
+            channel = self.blackboard.get_channel(self._current_mission_id, "approvals")
+            await self.blackboard.publish_event(channel, event)
+            
+            self.logger.info(f"📡 Published approval request: {approval_action.id}")
+        
+        # Return decision to wait for approval
+        return {
+            "decision": "ask_approval",
+            "reasoning": f"High-risk action detected: {risk_reason}. Waiting for user approval.",
+            "requires_approval": True,
+            "approval_action_id": str(approval_action.id),
+            "risk_level": risk_level.value,
+            "risk_reason": risk_reason,
+            "recommendations": [
+                "Review the proposed action carefully",
+                "Consider the potential impact on the target system",
+                "Approve only if the action aligns with mission objectives"
+            ]
+        }
     
     async def _llm_decision(
         self,
@@ -1041,6 +1199,14 @@ class AnalysisSpecialist(BaseSpecialist):
         
         elif decision_type == "escalate":
             await self._escalate_task(original_task_id, decision)
+        
+        elif decision_type == "ask_approval":
+            # HITL: Waiting for user approval - no action needed here
+            # The approval request has already been published
+            self.logger.info(
+                f"🔐 Task {original_task_id} awaiting user approval: "
+                f"{decision.get('risk_reason', 'High-risk action')}"
+            )
     
     async def _create_retry_task(
         self,

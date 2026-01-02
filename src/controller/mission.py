@@ -7,6 +7,8 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set
 from uuid import UUID, uuid4
+
+# Note: uuid4 is used for generating new UUIDs in HITL functionality
 import logging
 
 from ..core.blackboard import Blackboard
@@ -15,7 +17,10 @@ from ..core.models import (
     Target, TargetStatus,
     Vulnerability, Severity,
     Task, TaskType, TaskStatus, SpecialistType,
-    GoalStatus, GoalAchievedEvent
+    GoalStatus, GoalAchievedEvent,
+    # HITL Models
+    ApprovalAction, ApprovalStatus, ApprovalRequestEvent, ApprovalResponseEvent,
+    ActionType, RiskLevel, ChatMessage, ChatEvent
 )
 from ..core.config import Settings, get_settings
 from ..specialists.recon import ReconSpecialist
@@ -70,6 +75,12 @@ class MissionController:
         
         # Monitor interval (seconds)
         self._monitor_interval = 5
+        
+        # HITL: Pending approval actions
+        self._pending_approvals: Dict[str, ApprovalAction] = {}
+        
+        # HITL: Chat history per mission
+        self._chat_history: Dict[str, List[ChatMessage]] = {}
     
     # ═══════════════════════════════════════════════════════════
     # Mission Lifecycle
@@ -482,6 +493,462 @@ class MissionController:
     async def get_active_missions(self) -> List[str]:
         """Get list of active mission IDs."""
         return list(self._active_missions.keys())
+    
+    # ═══════════════════════════════════════════════════════════
+    # HITL (Human-in-the-Loop) Methods
+    # ═══════════════════════════════════════════════════════════
+    
+    async def request_approval(
+        self,
+        mission_id: str,
+        action: ApprovalAction
+    ) -> str:
+        """
+        Request user approval for a high-risk action.
+        
+        This pauses the mission (sets status to WAITING_FOR_APPROVAL)
+        and broadcasts an ApprovalRequestEvent via WebSocket.
+        
+        Args:
+            mission_id: Mission ID
+            action: ApprovalAction with details of what needs approval
+            
+        Returns:
+            Action ID
+        """
+        action_type_str = action.action_type.value if hasattr(action.action_type, 'value') else str(action.action_type)
+        self.logger.info(f"🔐 Requesting approval for action: {action_type_str}")
+        
+        action_id = str(action.id)
+        
+        # Store pending approval
+        self._pending_approvals[action_id] = action
+        
+        # Update mission status to waiting
+        await self.blackboard.update_mission_status(mission_id, MissionStatus.WAITING_FOR_APPROVAL)
+        
+        if mission_id in self._active_missions:
+            self._active_missions[mission_id]["status"] = MissionStatus.WAITING_FOR_APPROVAL
+        
+        # Publish approval request event
+        event = ApprovalRequestEvent(
+            mission_id=UUID(mission_id),
+            action_id=action.id,
+            action_type=action.action_type,
+            action_description=action.action_description,
+            target_ip=action.target_ip,
+            target_hostname=action.target_hostname,
+            risk_level=action.risk_level,
+            risk_reasons=action.risk_reasons,
+            potential_impact=action.potential_impact,
+            command_preview=action.command_preview,
+            expires_at=action.expires_at
+        )
+        
+        # Publish to blackboard for WebSocket broadcast
+        channel = self.blackboard.get_channel(mission_id, "approvals")
+        await self.blackboard.publish_event(channel, event)
+        
+        self.logger.info(f"⏳ Mission {mission_id} waiting for approval: {action_id}")
+        
+        return action_id
+    
+    async def approve_action(
+        self,
+        mission_id: str,
+        action_id: str,
+        user_comment: Optional[str] = None
+    ) -> bool:
+        """
+        Approve a pending action and resume mission execution.
+        
+        Args:
+            mission_id: Mission ID
+            action_id: Action ID to approve
+            user_comment: Optional comment from user
+            
+        Returns:
+            True if approved successfully
+        """
+        self.logger.info(f"✅ Approving action: {action_id}")
+        
+        # Verify action exists
+        if action_id not in self._pending_approvals:
+            self.logger.error(f"Action {action_id} not found in pending approvals")
+            return False
+        
+        action = self._pending_approvals[action_id]
+        
+        # Verify mission matches
+        if str(action.mission_id) != mission_id:
+            self.logger.error(f"Action {action_id} does not belong to mission {mission_id}")
+            return False
+        
+        # Update action status
+        action.status = ApprovalStatus.APPROVED
+        action.responded_at = datetime.utcnow()
+        action.user_comment = user_comment
+        
+        # Remove from pending
+        del self._pending_approvals[action_id]
+        
+        # Resume mission
+        await self.blackboard.update_mission_status(mission_id, MissionStatus.RUNNING)
+        
+        if mission_id in self._active_missions:
+            self._active_missions[mission_id]["status"] = MissionStatus.RUNNING
+        
+        # Publish approval response
+        response_event = ApprovalResponseEvent(
+            mission_id=UUID(mission_id),
+            action_id=UUID(action_id),
+            approved=True,
+            user_comment=user_comment
+        )
+        
+        channel = self.blackboard.get_channel(mission_id, "approvals")
+        await self.blackboard.publish_event(channel, response_event)
+        
+        # Resume specialists
+        await self._send_control_command(mission_id, "resume")
+        
+        # If there was a task waiting, re-queue it
+        if action.task_id:
+            await self._resume_approved_task(mission_id, action)
+        
+        self.logger.info(f"▶️ Mission {mission_id} resumed after approval")
+        
+        return True
+    
+    async def reject_action(
+        self,
+        mission_id: str,
+        action_id: str,
+        rejection_reason: Optional[str] = None,
+        user_comment: Optional[str] = None
+    ) -> bool:
+        """
+        Reject a pending action and prompt AnalysisSpecialist for alternative.
+        
+        Args:
+            mission_id: Mission ID
+            action_id: Action ID to reject
+            rejection_reason: Reason for rejection
+            user_comment: Optional comment from user
+            
+        Returns:
+            True if rejected successfully
+        """
+        self.logger.info(f"❌ Rejecting action: {action_id}")
+        
+        # Verify action exists
+        if action_id not in self._pending_approvals:
+            self.logger.error(f"Action {action_id} not found in pending approvals")
+            return False
+        
+        action = self._pending_approvals[action_id]
+        
+        # Verify mission matches
+        if str(action.mission_id) != mission_id:
+            self.logger.error(f"Action {action_id} does not belong to mission {mission_id}")
+            return False
+        
+        # Update action status
+        action.status = ApprovalStatus.REJECTED
+        action.responded_at = datetime.utcnow()
+        action.rejection_reason = rejection_reason
+        action.user_comment = user_comment
+        
+        # Remove from pending
+        del self._pending_approvals[action_id]
+        
+        # Publish rejection response
+        response_event = ApprovalResponseEvent(
+            mission_id=UUID(mission_id),
+            action_id=UUID(action_id),
+            approved=False,
+            rejection_reason=rejection_reason,
+            user_comment=user_comment
+        )
+        
+        channel = self.blackboard.get_channel(mission_id, "approvals")
+        await self.blackboard.publish_event(channel, response_event)
+        
+        # Request AnalysisSpecialist to find alternative
+        if action.task_id:
+            await self._request_alternative_analysis(mission_id, action, rejection_reason)
+        
+        # Resume mission (to allow alternative actions)
+        await self.blackboard.update_mission_status(mission_id, MissionStatus.RUNNING)
+        
+        if mission_id in self._active_missions:
+            self._active_missions[mission_id]["status"] = MissionStatus.RUNNING
+        
+        await self._send_control_command(mission_id, "resume")
+        
+        self.logger.info(f"▶️ Mission {mission_id} resumed, seeking alternatives")
+        
+        return True
+    
+    async def get_pending_approvals(self, mission_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all pending approval requests for a mission.
+        
+        Args:
+            mission_id: Mission ID
+            
+        Returns:
+            List of pending approval actions
+        """
+        pending = []
+        for action_id, action in self._pending_approvals.items():
+            if str(action.mission_id) == mission_id:
+                # Handle both enum and string values for action_type and risk_level
+                action_type = action.action_type.value if hasattr(action.action_type, 'value') else str(action.action_type)
+                risk_level = action.risk_level.value if hasattr(action.risk_level, 'value') else str(action.risk_level)
+                
+                pending.append({
+                    "action_id": action_id,
+                    "action_type": action_type,
+                    "action_description": action.action_description,
+                    "target_ip": action.target_ip,
+                    "risk_level": risk_level,
+                    "risk_reasons": action.risk_reasons,
+                    "potential_impact": action.potential_impact,
+                    "command_preview": action.command_preview,
+                    "requested_at": action.requested_at.isoformat(),
+                    "expires_at": action.expires_at.isoformat() if action.expires_at else None
+                })
+        return pending
+    
+    async def _resume_approved_task(self, mission_id: str, action: ApprovalAction) -> None:
+        """
+        Resume a task that was waiting for approval.
+        """
+        task_id = str(action.task_id)
+        
+        # Create a new task with the approved action
+        task = Task(
+            mission_id=UUID(mission_id),
+            type=TaskType.EXPLOIT if action.action_type == ActionType.EXPLOIT else TaskType.LATERAL,
+            specialist=SpecialistType.ATTACK,
+            priority=9,  # High priority for approved actions
+            rx_module=action.module_to_execute,
+        )
+        
+        # Add approval metadata
+        task.metadata["approved_action_id"] = str(action.id)
+        task.metadata["user_approved"] = True
+        task.metadata["parameters"] = action.parameters
+        
+        await self.blackboard.add_task(task)
+        self.logger.info(f"Re-queued approved task: {task.id}")
+    
+    async def _request_alternative_analysis(
+        self,
+        mission_id: str,
+        rejected_action: ApprovalAction,
+        rejection_reason: Optional[str]
+    ) -> None:
+        """
+        Request AnalysisSpecialist to find an alternative approach.
+        """
+        # Publish analysis request event
+        from ..core.models import TaskAnalysisRequestEvent
+        
+        event = TaskAnalysisRequestEvent(
+            mission_id=UUID(mission_id),
+            task_id=rejected_action.task_id or uuid4(),
+            task_type=TaskType.EXPLOIT,
+            error_context={
+                "error_type": "user_rejected",
+                "error_message": rejection_reason or "User rejected the proposed action",
+                "rejected_module": rejected_action.module_to_execute,
+                "rejection_reason": rejection_reason,
+                "original_action_type": rejected_action.action_type.value if hasattr(rejected_action.action_type, 'value') else str(rejected_action.action_type),
+                "target_ip": rejected_action.target_ip,
+            },
+            execution_logs=[],
+            priority=9
+        )
+        
+        channel = self.blackboard.get_channel(mission_id, "analysis")
+        await self.blackboard.publish_event(channel, event)
+        
+        self.logger.info(f"Requested alternative analysis after rejection")
+    
+    # ═══════════════════════════════════════════════════════════
+    # Chat / Interactive Methods
+    # ═══════════════════════════════════════════════════════════
+    
+    async def send_chat_message(
+        self,
+        mission_id: str,
+        content: str,
+        related_task_id: Optional[str] = None,
+        related_action_id: Optional[str] = None
+    ) -> ChatMessage:
+        """
+        Send a chat message from user to the system.
+        
+        This allows users to provide instructions or ask questions
+        during mission execution.
+        
+        Args:
+            mission_id: Mission ID
+            content: Message content
+            related_task_id: Optional related task
+            related_action_id: Optional related approval action
+            
+        Returns:
+            ChatMessage object
+        """
+        self.logger.info(f"💬 Chat message received for mission {mission_id}")
+        
+        # Create message - handle both UUID strings and regular strings
+        try:
+            mission_uuid = UUID(mission_id) if isinstance(mission_id, str) and len(mission_id) == 36 else uuid4()
+        except ValueError:
+            mission_uuid = uuid4()
+        
+        message = ChatMessage(
+            mission_id=mission_uuid,
+            role="user",
+            content=content,
+            related_task_id=UUID(related_task_id) if related_task_id and len(related_task_id) == 36 else None,
+            related_action_id=UUID(related_action_id) if related_action_id and len(related_action_id) == 36 else None
+        )
+        
+        # Store in history
+        if mission_id not in self._chat_history:
+            self._chat_history[mission_id] = []
+        self._chat_history[mission_id].append(message)
+        
+        # Publish chat event
+        event = ChatEvent(
+            mission_id=UUID(mission_id),
+            message_id=message.id,
+            role=message.role,
+            content=message.content,
+            related_task_id=message.related_task_id,
+            related_action_id=message.related_action_id
+        )
+        
+        channel = self.blackboard.get_channel(mission_id, "chat")
+        await self.blackboard.publish_event(channel, event)
+        
+        # Process the message and generate response
+        response = await self._process_chat_message(mission_id, message)
+        
+        if response:
+            self._chat_history[mission_id].append(response)
+            
+            # Publish response event
+            response_event = ChatEvent(
+                mission_id=UUID(mission_id),
+                message_id=response.id,
+                role=response.role,
+                content=response.content,
+                related_task_id=response.related_task_id,
+                related_action_id=response.related_action_id
+            )
+            await self.blackboard.publish_event(channel, response_event)
+        
+        return message
+    
+    async def get_chat_history(self, mission_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get chat history for a mission.
+        
+        Args:
+            mission_id: Mission ID
+            limit: Max messages to return
+            
+        Returns:
+            List of chat messages
+        """
+        history = self._chat_history.get(mission_id, [])
+        return [
+            {
+                "id": str(msg.id),
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat(),
+                "related_task_id": str(msg.related_task_id) if msg.related_task_id else None,
+                "related_action_id": str(msg.related_action_id) if msg.related_action_id else None
+            }
+            for msg in history[-limit:]
+        ]
+    
+    async def _process_chat_message(
+        self,
+        mission_id: str,
+        message: ChatMessage
+    ) -> Optional[ChatMessage]:
+        """
+        Process a chat message and generate a system response.
+        
+        This is where we can integrate LLM for intelligent responses.
+        """
+        content = message.content.lower()
+        
+        # Simple command parsing
+        response_content = None
+        
+        if "status" in content:
+            status = await self.get_mission_status(mission_id)
+            if status:
+                response_content = (
+                    f"📊 Mission Status: {status.get('status', 'unknown')}\n"
+                    f"Targets: {status.get('target_count', 0)}\n"
+                    f"Vulnerabilities: {status.get('vuln_count', 0)}\n"
+                    f"Goals: {status.get('statistics', {}).get('goals_achieved', 0)}/"
+                    f"{len(status.get('goals', {}))}"
+                )
+        
+        elif "pause" in content or "ايقاف" in content:
+            await self.pause_mission(mission_id)
+            response_content = "⏸️ Mission paused as requested."
+        
+        elif "resume" in content or "استئناف" in content:
+            await self.resume_mission(mission_id)
+            response_content = "▶️ Mission resumed."
+        
+        elif "pending" in content or "approvals" in content or "موافق" in content:
+            pending = await self.get_pending_approvals(mission_id)
+            if pending:
+                response_content = f"🔐 Pending approvals: {len(pending)}\n"
+                for p in pending:
+                    response_content += f"  - {p['action_type']}: {p['action_description'][:50]}...\n"
+            else:
+                response_content = "✅ No pending approvals."
+        
+        elif "help" in content or "مساعدة" in content:
+            response_content = (
+                "📖 Available commands:\n"
+                "  - 'status': Get mission status\n"
+                "  - 'pause': Pause the mission\n"
+                "  - 'resume': Resume the mission\n"
+                "  - 'pending': List pending approvals\n"
+                "  - 'help': Show this help message"
+            )
+        
+        else:
+            response_content = (
+                f"🤖 Received your message. "
+                f"Use 'help' to see available commands."
+            )
+        
+        if response_content:
+            return ChatMessage(
+                mission_id=UUID(mission_id),
+                role="system",
+                content=response_content,
+                related_task_id=message.related_task_id,
+                related_action_id=message.related_action_id
+            )
+        
+        return None
     
     async def shutdown(self) -> None:
         """Shutdown the controller gracefully."""

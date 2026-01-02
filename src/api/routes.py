@@ -14,7 +14,9 @@ from ..core.models import (
     Target, TargetStatus, Priority,
     Vulnerability, Severity,
     Credential, CredentialType,
-    Session, SessionStatus
+    Session, SessionStatus,
+    # HITL Models
+    ApprovalAction, ApprovalStatus, RiskLevel, ActionType
 )
 from ..controller.mission import MissionController
 
@@ -85,6 +87,60 @@ class VulnerabilityResponse(BaseModel):
     cvss: Optional[float] = None
     status: str
     exploit_available: bool = False
+
+
+# ═══════════════════════════════════════════════════════════════
+# HITL Request/Response Models
+# ═══════════════════════════════════════════════════════════════
+
+class ApprovalRequest(BaseModel):
+    """Request model for approving/rejecting actions."""
+    user_comment: Optional[str] = Field(None, description="Optional user comment")
+
+
+class RejectionRequest(BaseModel):
+    """Request model for rejecting actions."""
+    rejection_reason: Optional[str] = Field(None, description="Reason for rejection")
+    user_comment: Optional[str] = Field(None, description="Optional user comment")
+
+
+class ChatRequest(BaseModel):
+    """Request model for chat messages."""
+    content: str = Field(..., min_length=1, max_length=4096, description="Message content")
+    related_task_id: Optional[str] = Field(None, description="Related task ID")
+    related_action_id: Optional[str] = Field(None, description="Related approval action ID")
+
+
+class ApprovalResponse(BaseModel):
+    """Response model for approval operations."""
+    success: bool
+    message: str
+    action_id: str
+    mission_status: str
+
+
+class PendingApprovalResponse(BaseModel):
+    """Response model for pending approvals."""
+    action_id: str
+    action_type: str
+    action_description: str
+    target_ip: Optional[str] = None
+    risk_level: str
+    risk_reasons: List[str] = []
+    potential_impact: Optional[str] = None
+    command_preview: Optional[str] = None
+    requested_at: str
+    expires_at: Optional[str] = None
+
+
+class ChatMessageResponse(BaseModel):
+    """Response model for chat messages."""
+    id: str
+    role: str
+    content: str
+    timestamp: str
+    related_task_id: Optional[str] = None
+    related_action_id: Optional[str] = None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -362,3 +418,156 @@ async def get_mission_stats(
         "goals_total": total,
         "completion_percentage": (achieved / total * 100) if total > 0 else 0
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# HITL (Human-in-the-Loop) Endpoints
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/missions/{mission_id}/approvals", response_model=List[PendingApprovalResponse])
+async def list_pending_approvals(
+    mission_id: str,
+    controller: MissionController = Depends(get_controller)
+) -> List[PendingApprovalResponse]:
+    """
+    List all pending approval requests for a mission.
+    
+    These are high-risk actions waiting for user consent.
+    """
+    pending = await controller.get_pending_approvals(mission_id)
+    return [PendingApprovalResponse(**p) for p in pending]
+
+
+@router.post("/missions/{mission_id}/approve/{action_id}", response_model=ApprovalResponse)
+async def approve_action(
+    mission_id: str,
+    action_id: str,
+    request_data: ApprovalRequest = None,
+    controller: MissionController = Depends(get_controller)
+) -> ApprovalResponse:
+    """
+    Approve a pending action.
+    
+    This allows the action to proceed and resumes mission execution.
+    
+    - **action_id**: ID of the action to approve
+    - **user_comment**: Optional comment explaining the approval
+    """
+    user_comment = request_data.user_comment if request_data else None
+    
+    result = await controller.approve_action(
+        mission_id=mission_id,
+        action_id=action_id,
+        user_comment=user_comment
+    )
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to approve action {action_id}. It may not exist or belong to this mission."
+        )
+    
+    # Get current mission status
+    mission_data = await controller.get_mission_status(mission_id)
+    current_status = mission_data.get("status", "unknown") if mission_data else "unknown"
+    
+    return ApprovalResponse(
+        success=True,
+        message="Action approved successfully. Mission execution resumed.",
+        action_id=action_id,
+        mission_status=current_status
+    )
+
+
+@router.post("/missions/{mission_id}/reject/{action_id}", response_model=ApprovalResponse)
+async def reject_action(
+    mission_id: str,
+    action_id: str,
+    request_data: RejectionRequest = None,
+    controller: MissionController = Depends(get_controller)
+) -> ApprovalResponse:
+    """
+    Reject a pending action.
+    
+    The system will attempt to find an alternative approach.
+    
+    - **action_id**: ID of the action to reject
+    - **rejection_reason**: Reason for rejection
+    - **user_comment**: Optional additional comment
+    """
+    rejection_reason = request_data.rejection_reason if request_data else None
+    user_comment = request_data.user_comment if request_data else None
+    
+    result = await controller.reject_action(
+        mission_id=mission_id,
+        action_id=action_id,
+        rejection_reason=rejection_reason,
+        user_comment=user_comment
+    )
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to reject action {action_id}. It may not exist or belong to this mission."
+        )
+    
+    # Get current mission status
+    mission_data = await controller.get_mission_status(mission_id)
+    current_status = mission_data.get("status", "unknown") if mission_data else "unknown"
+    
+    return ApprovalResponse(
+        success=True,
+        message="Action rejected. System will seek alternatives.",
+        action_id=action_id,
+        mission_status=current_status
+    )
+
+
+@router.post("/missions/{mission_id}/chat", response_model=ChatMessageResponse)
+async def send_chat_message(
+    mission_id: str,
+    request_data: ChatRequest,
+    controller: MissionController = Depends(get_controller)
+) -> ChatMessageResponse:
+    """
+    Send a chat message to interact with the mission.
+    
+    This allows users to:
+    - Ask about mission status
+    - Give instructions (pause, resume)
+    - Query pending approvals
+    
+    - **content**: Message content
+    - **related_task_id**: Optional related task
+    - **related_action_id**: Optional related approval action
+    """
+    message = await controller.send_chat_message(
+        mission_id=mission_id,
+        content=request_data.content,
+        related_task_id=request_data.related_task_id,
+        related_action_id=request_data.related_action_id
+    )
+    
+    return ChatMessageResponse(
+        id=str(message.id),
+        role=message.role,
+        content=message.content,
+        timestamp=message.timestamp.isoformat(),
+        related_task_id=str(message.related_task_id) if message.related_task_id else None,
+        related_action_id=str(message.related_action_id) if message.related_action_id else None
+    )
+
+
+@router.get("/missions/{mission_id}/chat", response_model=List[ChatMessageResponse])
+async def get_chat_history(
+    mission_id: str,
+    limit: int = 50,
+    controller: MissionController = Depends(get_controller)
+) -> List[ChatMessageResponse]:
+    """
+    Get chat history for a mission.
+    
+    - **limit**: Maximum number of messages to return (default 50)
+    """
+    history = await controller.get_chat_history(mission_id, limit)
+    return [ChatMessageResponse(**msg) for msg in history]
