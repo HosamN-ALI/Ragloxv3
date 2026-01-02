@@ -18,7 +18,7 @@ import asyncio
 import os
 import sys
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pathlib import Path
 from uuid import uuid4
@@ -225,9 +225,9 @@ class AttackSimulator:
                 "technique_id": "T1110.001",
             },
             "execution_logs": [
-                {"timestamp": datetime.utcnow().isoformat(), "level": "INFO", "message": "Starting SSH bruteforce attack"},
-                {"timestamp": datetime.utcnow().isoformat(), "level": "INFO", "message": "Attempting authentication with user 'admin'"},
-                {"timestamp": datetime.utcnow().isoformat(), "level": "ERROR", "message": "Connection blocked by EDR"},
+                {"timestamp": datetime.now(timezone.utc).isoformat(), "level": "INFO", "message": "Starting SSH bruteforce attack"},
+                {"timestamp": datetime.now(timezone.utc).isoformat(), "level": "INFO", "message": "Attempting authentication with user 'admin'"},
+                {"timestamp": datetime.now(timezone.utc).isoformat(), "level": "ERROR", "message": "Connection blocked by EDR"},
             ]
         }
     
