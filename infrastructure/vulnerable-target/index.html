@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vulnerable Target - RAGLOX Test</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #00ff41;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #00ff41;
+        }
+        h1 {
+            text-align: center;
+            border-bottom: 2px solid #00ff41;
+            padding-bottom: 20px;
+        }
+        .warning {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid #ff4136;
+            color: #ff4136;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .info-box {
+            background: rgba(0, 255, 65, 0.1);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .services {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .service {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 3px solid #00ff41;
+        }
+        .service h3 {
+            margin: 0 0 10px 0;
+            color: #00ff41;
+        }
+        .service p {
+            margin: 0;
+            color: #888;
+        }
+        a {
+            color: #00d4ff;
+        }
+        code {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 RAGLOX Vulnerable Target</h1>
+        
+        <div class="warning">
+            ⚠️ <strong>WARNING:</strong> This server is intentionally vulnerable for testing purposes.
+            DO NOT expose to production networks!
+        </div>
+        
+        <div class="info-box">
+            <strong>Server Information:</strong><br>
+            Hostname: vulnerable-target<br>
+            OS: Ubuntu 22.04 LTS<br>
+            Purpose: RAGLOX E2E Testing Target
+        </div>
+        
+        <h2>🔓 Available Services</h2>
+        <div class="services">
+            <div class="service">
+                <h3>SSH (Port 22)</h3>
+                <p>OpenSSH Server<br>Password auth enabled</p>
+            </div>
+            <div class="service">
+                <h3>HTTP (Port 80)</h3>
+                <p>Nginx Web Server<br>Directory listing enabled</p>
+            </div>
+        </div>
+        
+        <h2>🔗 Interesting Endpoints</h2>
+        <ul>
+            <li><a href="/admin">Admin Panel</a> - Administrative interface</li>
+            <li><a href="/backup">Backup Directory</a> - Exposed backups</li>
+            <li><a href="/server-status">Server Status</a> - Nginx status</li>
+            <li><a href="/info">Server Info</a> - JSON configuration</li>
+        </ul>
+        
+        <h2>📝 Test Credentials</h2>
+        <div class="info-box">
+            <code>testuser:password123</code> - Standard user<br>
+            <code>admin:admin123</code> - Admin with sudo<br>
+            <code>backup:backup</code> - Service account<br>
+            <code>root:toor</code> - Root access
+        </div>
+        
+        <p style="text-align: center; margin-top: 30px; color: #666;">
+            Part of RAGLOX v3.0 Testing Infrastructure
+        </p>
+    </div>
+</body>
+</html>

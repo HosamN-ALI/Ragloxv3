@@ -1,0 +1,229 @@
+# ═══════════════════════════════════════════════════════════════
+# RAGLOX v3.0 - Docker Compose Configuration
+# Blackboard Architecture Infrastructure
+# ═══════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════════════════════════
+  # Redis - Blackboard (الحالة المشتركة)
+  # ═══════════════════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    container_name: raglox-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════
+  # PostgreSQL - التخزين الدائم
+  # ═══════════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:15-alpine
+    container_name: raglox-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raglox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-raglox}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./postgres/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raglox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════
+  # MinIO - تخزين الملفات (S3 Compatible)
+  # ═══════════════════════════════════════════════════════════════
+  minio:
+    image: minio/minio:latest
+    container_name: raglox-minio
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-raglox_access}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════
+  # MinIO Client - إنشاء Buckets
+  # ═══════════════════════════════════════════════════════════════
+  minio-setup:
+    image: minio/mc:latest
+    container_name: raglox-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-raglox_access}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set raglox http://minio:9000 $${MINIO_ACCESS_KEY} $${MINIO_SECRET_KEY};
+      mc mb --ignore-existing raglox/payloads;
+      mc mb --ignore-existing raglox/reports;
+      mc mb --ignore-existing raglox/logs;
+      mc mb --ignore-existing raglox/evidence;
+      echo 'Buckets created successfully!';
+      exit 0;
+      "
+    networks:
+      - raglox-network
+
+  # ═══════════════════════════════════════════════════════════════
+  # Redis Commander - واجهة إدارة Redis (اختياري)
+  # ═══════════════════════════════════════════════════════════════
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: raglox-redis-commander
+    profiles:
+      - dev
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════
+  # Adminer - واجهة إدارة PostgreSQL (اختياري)
+  # ═══════════════════════════════════════════════════════════════
+  adminer:
+    image: adminer:latest
+    container_name: raglox-adminer
+    profiles:
+      - dev
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════
+  # Vulnerable Target - هدف ضعيف للاختبار الحي
+  # ═══════════════════════════════════════════════════════════════
+  #
+  # ⚠️  WARNING: This container is INTENTIONALLY INSECURE!
+  # ⚠️  FOR TESTING/DEVELOPMENT PURPOSES ONLY!
+  #
+  # Features:
+  # - SSH (port 22) with weak password authentication
+  # - HTTP (port 80) with exposed information
+  # - Deliberate misconfigurations for testing
+  #
+  # Test Credentials:
+  # - testuser:password123 (standard user)
+  # - admin:admin123 (sudo user)
+  # - backup:backup (service account)
+  # - root:toor (root access)
+  #
+  vulnerable-target:
+    build:
+      context: ./vulnerable-target
+      dockerfile: Dockerfile
+    container_name: raglox-vulnerable-target
+    profiles:
+      - testing
+      - demo
+    hostname: vulnerable-target
+    ports:
+      - "2222:22"    # SSH (mapped to avoid conflict with host)
+      - "8088:80"    # HTTP (mapped to avoid conflict)
+    networks:
+      raglox-network:
+        ipv4_address: 172.28.0.100
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ && pgrep sshd"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    labels:
+      - "raglox.role=vulnerable-target"
+      - "raglox.test=true"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Additional Vulnerable Target (for lateral movement tests)
+  # ═══════════════════════════════════════════════════════════════
+  vulnerable-target-2:
+    build:
+      context: ./vulnerable-target
+      dockerfile: Dockerfile
+    container_name: raglox-vulnerable-target-2
+    profiles:
+      - testing
+      - demo
+    hostname: vulnerable-target-2
+    ports:
+      - "2223:22"
+      - "8089:80"
+    networks:
+      raglox-network:
+        ipv4_address: 172.28.0.101
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ && pgrep sshd"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    labels:
+      - "raglox.role=vulnerable-target"
+      - "raglox.test=true"
+
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  raglox-network:
+    name: raglox-network
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/24
+          gateway: 172.28.0.1
