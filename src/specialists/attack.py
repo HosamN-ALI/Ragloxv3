@@ -103,6 +103,38 @@ class AttackSpecialist(BaseSpecialist):
             ("browser_creds", CredentialType.PASSWORD, PrivilegeLevel.USER),
             ("config_files", CredentialType.PASSWORD, PrivilegeLevel.USER),
         ]
+        
+        # Priority scores for credential sources (higher = better priority)
+        # Intel/leaked credentials are prioritized over brute force
+        self._credential_priority_scores = {
+            # Intel sources (highest priority - leaked data)
+            "intel:stealer_log": 1.0,      # Stealer logs most reliable
+            "intel:database_dump": 0.95,   # DB dumps very reliable
+            "intel:arthouse": 0.9,         # ArtHouse breaches
+            "intel:fatetraffic": 0.9,      # Fatetraffic breaches
+            "intel:ransomware_leak": 0.88, # Ransomware leaks
+            "intel:combolist": 0.7,        # Combo lists
+            "intel:paste_site": 0.6,       # Paste sites
+            "intel:darkweb_market": 0.75,  # Darkweb markets
+            "intel:local_file": 0.8,       # Local file searches
+            "intel:elasticsearch": 0.85,   # Elasticsearch data lake
+            "intel:unknown": 0.65,         # Unknown intel source
+            
+            # Harvested sources (medium priority)
+            "mimikatz": 0.55,
+            "lsass_dump": 0.50,
+            "sam_dump": 0.45,
+            "browser_creds": 0.40,
+            "config_files": 0.35,
+            
+            # Brute force (lowest priority - should be last resort)
+            "brute_force": 0.2,
+            "dictionary_attack": 0.15,
+            "default_creds": 0.3,
+            
+            # Default fallback
+            "unknown": 0.25,
+        }
     
     # ═══════════════════════════════════════════════════════════
     # Task Execution
@@ -151,6 +183,24 @@ class AttackSpecialist(BaseSpecialist):
                 task=task,
                 cred_id=intel_cred_id
             )
+        
+        # If no intel cred provided directly, check for available intel credentials
+        if target_id and not intel_cred_id:
+            clean_target_id = target_id.replace("target:", "") if isinstance(target_id, str) else str(target_id)
+            intel_creds = await self.get_prioritized_credentials_for_target(clean_target_id)
+            
+            if intel_creds:
+                # Use the highest priority credential
+                best_cred = intel_creds[0]
+                self.logger.info(
+                    f"Found {len(intel_creds)} intel credentials for target. "
+                    f"Using best: priority={best_cred['priority_score']:.2f}, "
+                    f"source={self._mask_sensitive_data(best_cred.get('source', 'unknown'), show_chars=10)}"
+                )
+                return await self._execute_exploit_with_intel_cred(
+                    task=task,
+                    cred_id=best_cred["cred_id"]
+                )
         
         # Get target details
         target = None
@@ -1095,6 +1145,142 @@ class AttackSpecialist(BaseSpecialist):
         
         # Sort by reliability (highest first)
         return sorted(credentials, key=lambda c: c["reliability_score"], reverse=True)
+    
+    async def get_prioritized_credentials_for_target(
+        self,
+        target_id: str,
+        min_priority: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all credentials for a target, prioritized by source type.
+        
+        This method implements the credential priority system:
+        1. Intel/leaked credentials (highest priority)
+        2. Harvested credentials (medium priority)
+        3. Brute force results (lowest priority)
+        
+        Args:
+            target_id: Target ID
+            min_priority: Minimum priority score (0.0-1.0)
+            
+        Returns:
+            List of credentials sorted by priority_score (highest first)
+        """
+        credentials = []
+        
+        try:
+            # Get all credentials for the mission
+            mission_creds = await self.blackboard.get_mission_creds(self._current_mission_id)
+            
+            for cred_key in mission_creds:
+                cred_id = cred_key.replace("cred:", "")
+                cred = await self.blackboard.get_credential(cred_id)
+                
+                if not cred:
+                    continue
+                
+                # Check if credential could be for this target
+                cred_target_id = cred.get("target_id", "")
+                if isinstance(cred_target_id, str) and ":" in cred_target_id:
+                    cred_target_id = cred_target_id.replace("target:", "")
+                
+                # Only include credentials for this target or domain-level
+                if cred_target_id != target_id and not cred.get("domain"):
+                    continue
+                
+                # Calculate priority score
+                source = cred.get("source", "unknown")
+                priority_score = self._calculate_credential_priority(
+                    source=source,
+                    reliability_score=cred.get("reliability_score", 0.5),
+                    verified=cred.get("verified", False)
+                )
+                
+                if priority_score < min_priority:
+                    continue
+                
+                credentials.append({
+                    "cred_id": cred_id,
+                    "username": cred.get("username"),
+                    "domain": cred.get("domain"),
+                    "type": cred.get("type"),
+                    "source": source,
+                    "reliability_score": cred.get("reliability_score", 0.5),
+                    "priority_score": priority_score,
+                    "verified": cred.get("verified", False),
+                    "is_intel": source.startswith("intel:")
+                })
+        
+        except Exception as e:
+            self.logger.error(f"Error getting prioritized credentials: {e}")
+        
+        # Sort by priority score (highest first)
+        return sorted(credentials, key=lambda c: c["priority_score"], reverse=True)
+    
+    def _calculate_credential_priority(
+        self,
+        source: str,
+        reliability_score: float = 0.5,
+        verified: bool = False
+    ) -> float:
+        """
+        Calculate priority score for a credential.
+        
+        Priority is determined by:
+        1. Source type (intel sources get base boost)
+        2. Reliability score (weighted)
+        3. Verified status (bonus)
+        
+        Args:
+            source: Credential source string
+            reliability_score: Source reliability (0.0-1.0)
+            verified: Whether credential has been verified
+            
+        Returns:
+            Priority score (0.0-1.0)
+        """
+        # Get base priority from source type
+        source_lower = source.lower()
+        base_priority = self._credential_priority_scores.get("unknown", 0.25)
+        
+        # Check for exact match
+        if source_lower in self._credential_priority_scores:
+            base_priority = self._credential_priority_scores[source_lower]
+        else:
+            # Check for intel source prefix
+            for key, score in self._credential_priority_scores.items():
+                if key.startswith("intel:") and key in source_lower:
+                    base_priority = score
+                    break
+                elif source_lower.startswith("intel:"):
+                    # Generic intel source
+                    base_priority = 0.7
+                    break
+        
+        # Apply reliability score weight (30%)
+        reliability_weight = 0.3
+        priority = base_priority * (1 - reliability_weight) + reliability_score * reliability_weight
+        
+        # Bonus for verified credentials
+        if verified:
+            priority = min(priority + 0.1, 1.0)
+        
+        return round(priority, 3)
+    
+    def _mask_sensitive_data(self, data: str, show_chars: int = 2) -> str:
+        """
+        Mask sensitive data for logging.
+        
+        Args:
+            data: Data to mask
+            show_chars: Number of characters to show at start/end
+            
+        Returns:
+            Masked string
+        """
+        if not data or len(data) <= show_chars * 2:
+            return "***"
+        return f"{data[:show_chars]}***{data[-show_chars:]}"
     
     async def _check_goal_achievement(self, goal_name: str) -> None:
         """Check and update goal achievement."""

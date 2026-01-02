@@ -148,6 +148,60 @@ class Settings(BaseSettings):
     )
     
     # ═══════════════════════════════════════════════════════════
+    # Intel - Elasticsearch (Leaked Data Lake)
+    # ═══════════════════════════════════════════════════════════
+    intel_elastic_enabled: bool = Field(
+        default=False,
+        description="Enable Elasticsearch intel provider"
+    )
+    intel_elastic_url: str = Field(
+        default="http://localhost:9200",
+        description="Elasticsearch URL for intel/leak data"
+    )
+    intel_elastic_api_key: Optional[str] = Field(
+        default=None,
+        description="Elasticsearch API key (base64 encoded)"
+    )
+    intel_elastic_username: Optional[str] = Field(
+        default=None,
+        description="Elasticsearch username for basic auth"
+    )
+    intel_elastic_password: Optional[str] = Field(
+        default=None,
+        description="Elasticsearch password for basic auth"
+    )
+    intel_elastic_index: str = Field(
+        default="leaks-*",
+        description="Elasticsearch index pattern for leaked data"
+    )
+    intel_elastic_timeout: int = Field(
+        default=30,
+        description="Elasticsearch request timeout in seconds"
+    )
+    intel_elastic_max_retries: int = Field(
+        default=3,
+        description="Maximum retries for Elasticsearch connection"
+    )
+    intel_elastic_verify_certs: bool = Field(
+        default=True,
+        description="Verify Elasticsearch SSL certificates"
+    )
+    intel_elastic_ca_certs: Optional[str] = Field(
+        default=None,
+        description="Path to CA certificates for Elasticsearch"
+    )
+    
+    # Intel - General Settings
+    intel_file_data_dir: str = Field(
+        default="./data/breach_data",
+        description="Directory for local breach data files"
+    )
+    intel_credential_priority_boost: float = Field(
+        default=0.3,
+        description="Priority boost for intel credentials over brute force (0.0-0.5)"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
     # LLM Configuration
     # ═══════════════════════════════════════════════════════════
     llm_enabled: bool = Field(

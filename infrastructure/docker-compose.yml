@@ -77,6 +77,63 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════════════════
+  # Elasticsearch - Intel Data Lake (Leaked Credentials)
+  # ═══════════════════════════════════════════════════════════════
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: raglox-elasticsearch
+    profiles:
+      - intel
+      - dev
+      - demo
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=raglox-intel
+      - node.name=raglox-es-01
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - raglox-network
+    restart: unless-stopped
+    labels:
+      - "raglox.role=intel-datalake"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Kibana - Elasticsearch UI (Optional, for debugging)
+  # ═══════════════════════════════════════════════════════════════
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.3
+    container_name: raglox-kibana
+    profiles:
+      - intel
+      - dev
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=raglox-kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - raglox-network
+    restart: unless-stopped
+    labels:
+      - "raglox.role=intel-ui"
+
+  # ═══════════════════════════════════════════════════════════════
   # MinIO Client - إنشاء Buckets
   # ═══════════════════════════════════════════════════════════════
   minio-setup:
@@ -216,6 +273,8 @@ volumes:
   postgres_data:
     driver: local
   minio_data:
+    driver: local
+  elasticsearch_data:
     driver: local
 
 networks:
