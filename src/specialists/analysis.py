@@ -478,9 +478,9 @@ class AnalysisSpecialist(BaseSpecialist):
         # Get retry strategy for this category
         strategy = self.RETRY_STRATEGIES.get(category, self.RETRY_STRATEGIES["unknown"])
         
-        # Check retry count
-        retry_count = original_task.get("retry_count", 0)
-        max_retries = original_task.get("max_retries", strategy["max_retries"])
+        # Check retry count (ensure integers as Redis may return strings)
+        retry_count = int(original_task.get("retry_count", 0) or 0)
+        max_retries = int(original_task.get("max_retries", strategy["max_retries"]) or strategy["max_retries"])
         
         # Gather context for decision
         context = await self._gather_analysis_context(original_task, error_context)
@@ -1281,7 +1281,7 @@ class AnalysisSpecialist(BaseSpecialist):
         # Network issues - retry if within limits, adapt after multiple failures
         if category == "network":
             # Use task-specific max_retries if available, otherwise use strategy default
-            task_max_retries = original_task.get("max_retries", max_retries)
+            task_max_retries = int(original_task.get("max_retries", max_retries) or max_retries)
             effective_max = min(task_max_retries, max_retries)
             
             if retry_count < effective_max - 1:  # Leave room for adaptation
