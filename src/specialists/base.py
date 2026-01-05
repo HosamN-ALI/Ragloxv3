@@ -294,8 +294,17 @@ class BaseSpecialist(ABC):
                     # No tasks available, wait briefly
                     await asyncio.sleep(0.5)
                     
-            except Exception as e:
-                self.logger.error(f"Error in task loop: {e}", exc_info=True)
+            except asyncio.CancelledError:
+                # SEC-01: Handle task cancellation gracefully
+                self.logger.info("Task loop cancelled")
+                break
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors with retry
+                self.logger.warning(f"Connection error in task loop: {e}")
+                await asyncio.sleep(2)  # Longer wait for connection issues
+            except (KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle data errors
+                self.logger.error(f"Data error in task loop: {e}")
                 await asyncio.sleep(1)
     
     async def _process_task_with_semaphore(self, task_id: str) -> None:
@@ -326,8 +335,16 @@ class BaseSpecialist(ABC):
             # Execute the actual task
             try:
                 await self._process_task(task_id)
-            except Exception as e:
-                self.logger.error(f"Task {task_id} execution failed: {e}", exc_info=True)
+            except asyncio.CancelledError:
+                # SEC-01: Handle task cancellation
+                self.logger.info(f"Task {task_id} was cancelled")
+                raise  # Re-raise to allow proper cleanup
+            except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+                # SEC-01: Handle connection/timeout errors
+                self.logger.error(f"Task {task_id} connection/timeout error: {e}")
+            except (KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle data/validation errors
+                self.logger.error(f"Task {task_id} data error: {e}")
             finally:
                 # Semaphore is automatically released by async with context manager
                 self.logger.debug(f"Task {task_id} released execution slot")
@@ -366,8 +383,17 @@ class BaseSpecialist(ABC):
                 if message and self._running:
                     await self.on_event(message)
                     
-            except Exception as e:
-                self.logger.error(f"Error in event loop: {e}")
+            except asyncio.CancelledError:
+                # SEC-01: Handle event loop cancellation
+                self.logger.info("Event loop cancelled")
+                break
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors
+                self.logger.warning(f"Connection error in event loop: {e}")
+                await asyncio.sleep(2)
+            except (KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle data errors
+                self.logger.error(f"Data error in event loop: {e}")
                 await asyncio.sleep(1)
     
     async def _heartbeat_loop(self) -> None:
@@ -380,8 +406,17 @@ class BaseSpecialist(ABC):
                         self.worker_id
                     )
                 await asyncio.sleep(self._heartbeat_interval)
-            except Exception as e:
-                self.logger.error(f"Error in heartbeat loop: {e}")
+            except asyncio.CancelledError:
+                # SEC-01: Handle heartbeat cancellation
+                self.logger.info("Heartbeat loop cancelled")
+                break
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors with longer retry
+                self.logger.warning(f"Connection error in heartbeat: {e}")
+                await asyncio.sleep(10)  # Longer wait for connection issues
+            except (KeyError, ValueError) as e:
+                # SEC-01: Handle data errors
+                self.logger.error(f"Data error in heartbeat: {e}")
                 await asyncio.sleep(5)
     
     # ═══════════════════════════════════════════════════════════
@@ -457,32 +492,28 @@ class BaseSpecialist(ABC):
             
             self.logger.info(f"Task {task_id} completed successfully with policy {retry_policy_name}")
             
-        except Exception as e:
-            self.logger.error(f"Task {task_id} failed after retries: {e}")
-            
-            # Extract error context for Reflexion analysis
+        except asyncio.CancelledError:
+            # SEC-01: Handle task cancellation
+            self.logger.info(f"Task {task_id} was cancelled")
+            raise
+        except asyncio.TimeoutError as e:
+            # SEC-01: Handle timeout specifically
+            self.logger.error(f"Task {task_id} timed out: {e}")
             error_context = self._extract_error_context(e, task)
-            
-            # Mark task as failed
-            await self.blackboard.fail_task(
-                self._current_mission_id,
-                task_id,
-                str(e),
-                error_context=error_context
-            )
-            
-            # Log error for analysis
-            await self.blackboard.log_result(
-                self._current_mission_id,
-                "task_failed",
-                {
-                    "task_id": task_id,
-                    "task_type": task.get("type"),
-                    "worker_id": self.worker_id,
-                    "error": str(e),
-                    "error_context": error_context
-                }
-            )
+            error_context["category"] = "timeout"
+            await self._handle_task_failure(task_id, task, "Task timed out", error_context)
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Task {task_id} connection error: {e}")
+            error_context = self._extract_error_context(e, task)
+            error_context["category"] = "network"
+            await self._handle_task_failure(task_id, task, f"Connection error: {type(e).__name__}", error_context)
+        except (KeyError, ValueError, TypeError) as e:
+            # SEC-01: Handle data/validation errors
+            self.logger.error(f"Task {task_id} data error: {e}")
+            error_context = self._extract_error_context(e, task)
+            error_context["category"] = "validation"
+            await self._handle_task_failure(task_id, task, f"Data error: {type(e).__name__}", error_context)
     
     def _get_retry_policy_for_task(self, task_type: str, task: Dict[str, Any]) -> str:
         """
@@ -541,6 +572,52 @@ class BaseSpecialist(ABC):
             "task_params": task.get("params", {}),
             "timestamp": datetime.now().isoformat()
         }
+    
+    async def _handle_task_failure(
+        self,
+        task_id: str,
+        task: Dict[str, Any],
+        error_message: str,
+        error_context: Dict[str, Any]
+    ) -> None:
+        """
+        SEC-01: Centralized task failure handling.
+        
+        Handles logging and blackboard updates for failed tasks
+        with sanitized error information.
+        
+        Args:
+            task_id: ID of the failed task
+            task: Task dictionary
+            error_message: Sanitized error message
+            error_context: Error context for Reflexion
+        """
+        # Mark task as failed
+        try:
+            await self.blackboard.fail_task(
+                self._current_mission_id,
+                task_id,
+                error_message,  # Already sanitized
+                error_context=error_context
+            )
+        except (ConnectionError, OSError) as e:
+            self.logger.error(f"Failed to mark task {task_id} as failed: {e}")
+        
+        # Log error for analysis
+        try:
+            await self.blackboard.log_result(
+                self._current_mission_id,
+                "task_failed",
+                {
+                    "task_id": task_id,
+                    "task_type": task.get("type"),
+                    "worker_id": self.worker_id,
+                    "error": error_message,
+                    "error_context": error_context
+                }
+            )
+        except (ConnectionError, OSError) as e:
+            self.logger.error(f"Failed to log task failure for {task_id}: {e}")
     
     # ═══════════════════════════════════════════════════════════
     # Pub/Sub
@@ -885,9 +962,15 @@ class BaseSpecialist(ABC):
             self.logger.debug(
                 f"Session {session_id} registered with SessionManager"
             )
-        except Exception as e:
+        except (ImportError, AttributeError) as e:
+            # SEC-01: Handle missing SessionManager or attribute errors
             self.logger.warning(
-                f"Failed to register session with SessionManager: {e}"
+                f"SessionManager not available: {type(e).__name__}"
+            )
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.warning(
+                f"Failed to register session due to connection error"
             )
         
         # Publish event
@@ -929,8 +1012,13 @@ class BaseSpecialist(ABC):
         if self._knowledge is None:
             try:
                 self._knowledge = get_knowledge()
-            except Exception as e:
-                self.logger.warning(f"Failed to get knowledge base: {e}")
+            except (ImportError, AttributeError) as e:
+                # SEC-01: Handle missing knowledge base module
+                self.logger.warning(f"Knowledge base not available: {type(e).__name__}")
+                return None
+            except (ValueError, TypeError) as e:
+                # SEC-01: Handle configuration errors
+                self.logger.warning(f"Knowledge base configuration error")
                 return None
         return self._knowledge
     
@@ -947,8 +1035,13 @@ class BaseSpecialist(ABC):
                 from ..executors import get_rx_module_runner
                 self._runner = get_rx_module_runner()
                 self._execution_mode = "real"
-            except Exception as e:
-                self.logger.warning(f"Failed to get RX Module Runner: {e}")
+            except (ImportError, AttributeError) as e:
+                # SEC-01: Handle missing RX Module Runner
+                self.logger.warning(f"RX Module Runner not available: {type(e).__name__}")
+                return None
+            except (ValueError, TypeError) as e:
+                # SEC-01: Handle configuration errors
+                self.logger.warning(f"RX Module Runner configuration error")
                 return None
         return self._runner
     
@@ -964,8 +1057,13 @@ class BaseSpecialist(ABC):
             try:
                 from ..executors import get_executor_factory
                 self._executor_factory = get_executor_factory()
-            except Exception as e:
-                self.logger.warning(f"Failed to get Executor Factory: {e}")
+            except (ImportError, AttributeError) as e:
+                # SEC-01: Handle missing Executor Factory
+                self.logger.warning(f"Executor Factory not available: {type(e).__name__}")
+                return None
+            except (ValueError, TypeError) as e:
+                # SEC-01: Handle configuration errors
+                self.logger.warning(f"Executor Factory configuration error")
                 return None
         return self._executor_factory
     
@@ -1222,9 +1320,15 @@ class BaseSpecialist(ABC):
                     self.logger.debug(
                         f"Heartbeat sent for session {session_id}"
                     )
-                except Exception as e:
+                except (ImportError, AttributeError) as e:
+                    # SEC-01: Handle missing SessionManager
                     self.logger.debug(
-                        f"Failed to send heartbeat: {e}"
+                        f"SessionManager not available for heartbeat"
+                    )
+                except (ConnectionError, OSError) as e:
+                    # SEC-01: Handle connection errors
+                    self.logger.debug(
+                        f"Connection error during heartbeat"
                     )
             
             # Build response
@@ -1251,11 +1355,42 @@ class BaseSpecialist(ABC):
             
             return response
             
-        except Exception as e:
-            self.logger.error(f"Error executing RX module {rx_module_id}: {e}")
+        except asyncio.TimeoutError as e:
+            # SEC-01: Handle execution timeout
+            self.logger.error(f"RX module {rx_module_id} timed out")
             default_result["error_context"] = {
-                "error_type": "execution_exception",
-                "error_message": str(e),
+                "error_type": "timeout",
+                "error_message": "Execution timed out",
+                "module_used": rx_module_id,
+                "target_host": target_host
+            }
+            return default_result
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error executing RX module {rx_module_id}")
+            default_result["error_context"] = {
+                "error_type": "connection_error",
+                "error_message": f"Connection error: {type(e).__name__}",
+                "module_used": rx_module_id,
+                "target_host": target_host
+            }
+            return default_result
+        except (ImportError, AttributeError) as e:
+            # SEC-01: Handle missing dependencies
+            self.logger.error(f"Missing dependency for RX module {rx_module_id}")
+            default_result["error_context"] = {
+                "error_type": "dependency_error",
+                "error_message": f"Missing dependency: {type(e).__name__}",
+                "module_used": rx_module_id,
+                "target_host": target_host
+            }
+            return default_result
+        except (ValueError, TypeError) as e:
+            # SEC-01: Handle validation errors
+            self.logger.error(f"Validation error executing RX module {rx_module_id}")
+            default_result["error_context"] = {
+                "error_type": "validation_error",
+                "error_message": f"Invalid parameters: {type(e).__name__}",
                 "module_used": rx_module_id,
                 "target_host": target_host
             }
@@ -1343,9 +1478,25 @@ class BaseSpecialist(ABC):
                 "duration_ms": result.duration_ms
             }
             
-        except Exception as e:
-            self.logger.error(f"Error executing command: {e}")
-            default_result["stderr"] = str(e)
+        except asyncio.TimeoutError as e:
+            # SEC-01: Handle command timeout
+            self.logger.error(f"Command execution timed out")
+            default_result["stderr"] = "Command execution timed out"
+            return default_result
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error executing command")
+            default_result["stderr"] = f"Connection error: {type(e).__name__}"
+            return default_result
+        except (ImportError, AttributeError) as e:
+            # SEC-01: Handle missing dependencies
+            self.logger.error(f"Missing dependency for command execution")
+            default_result["stderr"] = f"Missing dependency"
+            return default_result
+        except (ValueError, TypeError) as e:
+            # SEC-01: Handle validation errors
+            self.logger.error(f"Validation error in command execution")
+            default_result["stderr"] = f"Invalid parameters"
             return default_result
     
     async def log_execution_to_blackboard(
@@ -1392,8 +1543,12 @@ class BaseSpecialist(ABC):
                     }
                 )
                 
-        except Exception as e:
-            self.logger.error(f"Error logging execution to Blackboard: {e}")
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error logging to Blackboard")
+        except (KeyError, ValueError, TypeError) as e:
+            # SEC-01: Handle data errors
+            self.logger.error(f"Data error logging to Blackboard: {type(e).__name__}")
     
     async def cleanup_connections(self) -> None:
         """
@@ -1406,8 +1561,12 @@ class BaseSpecialist(ABC):
             try:
                 await self._executor_factory.cleanup_dead_connections()
                 self.logger.debug("Cleaned up dead connections")
-            except Exception as e:
-                self.logger.warning(f"Error cleaning up connections: {e}")
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors during cleanup
+                self.logger.warning(f"Connection error during cleanup")
+            except (AttributeError, RuntimeError) as e:
+                # SEC-01: Handle already closed connections
+                self.logger.warning(f"Cleanup error: {type(e).__name__}")
     
     def get_stats(self) -> Dict[str, Any]:
         """

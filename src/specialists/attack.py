@@ -410,8 +410,12 @@ class AttackSpecialist(BaseSpecialist):
                     constraints = mission_data.get("constraints", [])
                     if any("stealth" in str(c).lower() for c in constraints):
                         stealth_level = "high"
-            except Exception as e:
-                self.logger.warning(f"Failed to get mission context: {e}")
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors
+                self.logger.warning(f"Connection error getting mission context")
+            except (KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle data errors
+                self.logger.warning(f"Data error getting mission context")
         
         # Get available credentials
         available_credentials = []
@@ -419,8 +423,12 @@ class AttackSpecialist(BaseSpecialist):
             try:
                 creds = await self.blackboard.get_target_credentials(mission_id, target_id)
                 available_credentials = [c.get("cred_id") for c in (creds or [])]
-            except Exception as e:
-                self.logger.debug(f"Failed to get credentials: {e}")
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors
+                self.logger.debug(f"Connection error getting credentials")
+            except (KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle data errors
+                self.logger.debug(f"Data error getting credentials")
         
         # Build decision context
         decision_context = DecisionContext(
@@ -790,13 +798,38 @@ class AttackSpecialist(BaseSpecialist):
             
             return result
             
-        except Exception as e:
-            self.logger.error(f"Real exploit execution failed: {e}")
+        except asyncio.TimeoutError as e:
+            # SEC-01: Handle execution timeout
+            self.logger.error(f"Real exploit execution timed out")
             return {
                 "success": False,
                 "error_context": {
-                    "error_type": "execution_exception",
-                    "error_message": str(e),
+                    "error_type": "timeout",
+                    "error_message": "Exploit execution timed out",
+                    "module_used": rx_module_id,
+                    "vuln_type": vuln_type
+                }
+            }
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error during exploit execution")
+            return {
+                "success": False,
+                "error_context": {
+                    "error_type": "connection_error",
+                    "error_message": f"Connection error: {type(e).__name__}",
+                    "module_used": rx_module_id,
+                    "vuln_type": vuln_type
+                }
+            }
+        except (KeyError, ValueError, TypeError) as e:
+            # SEC-01: Handle data/validation errors
+            self.logger.error(f"Data error during exploit execution")
+            return {
+                "success": False,
+                "error_context": {
+                    "error_type": "validation_error",
+                    "error_message": f"Data error: {type(e).__name__}",
                     "module_used": rx_module_id,
                     "vuln_type": vuln_type
                 }
@@ -896,8 +929,12 @@ class AttackSpecialist(BaseSpecialist):
             )
             if scorer_rate is not None:
                 return scorer_rate
-        except Exception as e:
-            self.logger.warning(f"StrategicScorer fallback failed: {e}")
+        except (AttributeError, KeyError, ValueError) as e:
+            # SEC-01: Handle scorer errors
+            self.logger.warning(f"StrategicScorer fallback failed: {type(e).__name__}")
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.warning(f"StrategicScorer connection error")
         
         base_rate = 0.3  # Conservative baseline
         
@@ -978,7 +1015,11 @@ class AttackSpecialist(BaseSpecialist):
                 # Higher CVSS = more severe = often more reliably exploitable
                 cvss = module.get("cvss", 5.0)
                 return min(cvss / 10.0, 0.95)
-        except Exception:
+        except (AttributeError, KeyError, ValueError, TypeError):
+            # SEC-01: Handle data errors silently (expected in some cases)
+            pass
+        except (ConnectionError, OSError):
+            # SEC-01: Handle connection errors silently
             pass
         
         return None
@@ -1132,8 +1173,9 @@ class AttackSpecialist(BaseSpecialist):
                             "target_privilege": PrivilegeLevel.ROOT if platform == "linux" else PrivilegeLevel.SYSTEM,
                             "supports_evasion": module.get("supports_evasion", False)
                         })
-            except Exception as e:
-                self.logger.debug(f"Error getting privesc techniques from KB: {e}")
+            except (AttributeError, KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle knowledge base errors
+                self.logger.debug(f"Error getting privesc techniques from KB: {type(e).__name__}")
         
         return techniques
     
@@ -1425,8 +1467,15 @@ class AttackSpecialist(BaseSpecialist):
                 if task_id:
                     await self.log_execution_to_blackboard(task_id, result)
                     
-            except Exception as e:
-                self.logger.error(f"Error executing cred module {rx_module_id}: {e}")
+            except asyncio.TimeoutError as e:
+                # SEC-01: Handle module timeout
+                self.logger.error(f"Cred module {rx_module_id} timed out")
+            except (ConnectionError, OSError) as e:
+                # SEC-01: Handle connection errors
+                self.logger.error(f"Connection error executing cred module {rx_module_id}")
+            except (KeyError, ValueError, TypeError) as e:
+                # SEC-01: Handle data/validation errors
+                self.logger.error(f"Data error executing cred module {rx_module_id}: {type(e).__name__}")
         
         # If no creds found via real modules, try simulation
         if not harvested_creds:
@@ -1911,8 +1960,12 @@ class AttackSpecialist(BaseSpecialist):
             # Update credential verification status
             # In production, would update the Blackboard credential record
             self.logger.info(f"Verified credential {cred_id}")
-        except Exception as e:
-            self.logger.error(f"Error verifying credential: {e}")
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error verifying credential")
+        except (KeyError, ValueError) as e:
+            # SEC-01: Handle data errors
+            self.logger.error(f"Data error verifying credential")
     
     async def get_intel_credentials_for_target(
         self,
@@ -1972,8 +2025,12 @@ class AttackSpecialist(BaseSpecialist):
                         "verified": cred.get("verified", False)
                     })
         
-        except Exception as e:
-            self.logger.error(f"Error getting intel credentials: {e}")
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error getting intel credentials")
+        except (KeyError, ValueError, TypeError) as e:
+            # SEC-01: Handle data errors
+            self.logger.error(f"Data error getting intel credentials")
         
         # Sort by reliability (highest first)
         return sorted(credentials, key=lambda c: c["reliability_score"], reverse=True)
@@ -2043,8 +2100,12 @@ class AttackSpecialist(BaseSpecialist):
                     "is_intel": source.startswith("intel:")
                 })
         
-        except Exception as e:
-            self.logger.error(f"Error getting prioritized credentials: {e}")
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error getting prioritized credentials")
+        except (KeyError, ValueError, TypeError) as e:
+            # SEC-01: Handle data errors
+            self.logger.error(f"Data error getting prioritized credentials")
         
         # Sort by priority score (highest first)
         return sorted(credentials, key=lambda c: c["priority_score"], reverse=True)
@@ -2134,8 +2195,12 @@ class AttackSpecialist(BaseSpecialist):
                 await self.publish_event(event)
                 
                 self.logger.info(f"🎯 Goal achieved: {goal_name}")
-        except Exception as e:
-            self.logger.error(f"Error checking goal achievement: {e}")
+        except (ConnectionError, OSError) as e:
+            # SEC-01: Handle connection errors
+            self.logger.error(f"Connection error checking goal achievement")
+        except (KeyError, ValueError, TypeError) as e:
+            # SEC-01: Handle data errors
+            self.logger.error(f"Data error checking goal achievement")
     
     # ═══════════════════════════════════════════════════════════
     # Event Handling
