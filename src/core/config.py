@@ -202,6 +202,80 @@ class Settings(BaseSettings):
     )
     
     # ═══════════════════════════════════════════════════════════
+    # Metasploit & Exploitation Framework
+    # ═══════════════════════════════════════════════════════════
+    use_real_exploits: bool = Field(
+        default=False,
+        description="Enable real exploitation (requires Metasploit RPC)"
+    )
+    msf_rpc_host: str = Field(
+        default="localhost",
+        description="Metasploit RPC server host"
+    )
+    msf_rpc_port: int = Field(
+        default=55553,
+        description="Metasploit RPC server port"
+    )
+    msf_rpc_user: str = Field(
+        default="msf",
+        description="Metasploit RPC username"
+    )
+    msf_rpc_pass: str = Field(
+        default="",
+        description="Metasploit RPC password"
+    )
+    msf_rpc_ssl: bool = Field(
+        default=False,
+        description="Use SSL for Metasploit RPC connection"
+    )
+    msf_rpc_timeout: int = Field(
+        default=30,
+        description="Metasploit RPC connection timeout in seconds"
+    )
+    
+    # Exploitation Listener Configuration
+    lhost: str = Field(
+        default="0.0.0.0",
+        description="Listener host for reverse shells (LHOST)"
+    )
+    lport: int = Field(
+        default=4444,
+        description="Listener port for reverse shells (LPORT)"
+    )
+    
+    # C2 Configuration
+    c2_encryption_enabled: bool = Field(
+        default=True,
+        description="Enable AES-256-GCM encryption for C2 sessions"
+    )
+    c2_data_dir: str = Field(
+        default="data/c2",
+        description="Directory for C2 session data and logs"
+    )
+    c2_session_timeout: int = Field(
+        default=3600,
+        description="C2 session timeout in seconds (1 hour)"
+    )
+    c2_heartbeat_interval: int = Field(
+        default=60,
+        description="C2 heartbeat interval in seconds"
+    )
+    
+    # Post-Exploitation Configuration
+    mimikatz_enabled: bool = Field(
+        default=True,
+        description="Enable Mimikatz credential harvesting"
+    )
+    network_pivoting_enabled: bool = Field(
+        default=True,
+        description="Enable network pivoting and SOCKS proxy"
+    )
+    socks_proxy_port: int = Field(
+        default=1080,
+        description="SOCKS proxy port for network pivoting"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
     # LLM Configuration
     # ═══════════════════════════════════════════════════════════
     llm_enabled: bool = Field(

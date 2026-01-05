@@ -462,12 +462,45 @@ class MissionController:
         self._specialists["recon"].append(recon)
         
         # Create and start Attack specialist
+        # Initialize Real Exploitation Engine if enabled
+        real_exploitation_engine = None
+        c2_manager = None
+        use_real_exploits = False
+        
+        if self.settings.use_real_exploits:
+            try:
+                from ..specialists.attack_integration import get_real_exploitation_engine
+                from ..exploitation.c2.session_manager import C2SessionManager
+                
+                real_exploitation_engine = get_real_exploitation_engine()
+                
+                # Initialize C2SessionManager if not already available
+                c2_manager = C2SessionManager(
+                    encryption_enabled=self.settings.c2_encryption_enabled,
+                    data_dir=self.settings.c2_data_dir
+                )
+                
+                use_real_exploits = True
+                self.logger.info("🎯 Attack specialist using REAL EXPLOITATION")
+                self.logger.info(f"🌐 C2 Session Manager initialized for mission {mission_id}")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize real exploitation: {e}")
+                self.logger.warning("Attack specialist falling back to SIMULATION mode")
+        
         attack = AttackSpecialist(
             blackboard=Blackboard(settings=self.settings),
-            settings=self.settings
+            settings=self.settings,
+            use_real_exploits=use_real_exploits,
+            real_exploitation_engine=real_exploitation_engine
         )
         await attack.start(mission_id)
         self._specialists["attack"].append(attack)
+        
+        # Store C2SessionManager reference for cleanup
+        if c2_manager:
+            if not hasattr(self, '_c2_managers'):
+                self._c2_managers = {}
+            self._c2_managers[mission_id] = c2_manager
         
         self.logger.info(f"Specialists started for mission {mission_id}")
     
@@ -480,6 +513,16 @@ class MissionController:
             for specialist in specialists:
                 if specialist.current_mission == mission_id:
                     await specialist.stop()
+        
+        # Cleanup C2 sessions for this mission
+        if hasattr(self, '_c2_managers') and mission_id in self._c2_managers:
+            try:
+                c2_manager = self._c2_managers[mission_id]
+                await c2_manager.cleanup_all_sessions()
+                del self._c2_managers[mission_id]
+                self.logger.info(f"🌐 C2 sessions cleaned up for mission {mission_id}")
+            except Exception as e:
+                self.logger.error(f"Error cleaning up C2 sessions: {e}")
         
         self.logger.info(f"Specialists stopped for mission {mission_id}")
     

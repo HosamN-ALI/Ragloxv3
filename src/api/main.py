@@ -23,6 +23,7 @@ from ..controller.mission import MissionController
 from .routes import router
 from .websocket import websocket_router
 from .knowledge_routes import router as knowledge_router
+from .exploitation_routes import router as exploitation_router
 
 # ═══════════════════════════════════════════════════════════════
 # INTEGRATION: Shutdown Manager
@@ -112,6 +113,87 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # ═══════════════════════════════════════════════════════════════
     shutdown_manager = get_shutdown_manager()
     logger.info("🛡️ Shutdown Manager initialized")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize Metasploit & Exploitation Framework
+    # ═══════════════════════════════════════════════════════════════
+    metasploit_adapter = None
+    if settings.use_real_exploits:
+        try:
+            from ..exploitation.adapters.metasploit_adapter import get_metasploit_adapter
+            logger.info("🎯 Real Exploitation ENABLED - Initializing Metasploit RPC...")
+            logger.info(f"   MSF RPC: {settings.msf_rpc_host}:{settings.msf_rpc_port}")
+            
+            metasploit_adapter = get_metasploit_adapter(
+                host=settings.msf_rpc_host,
+                port=settings.msf_rpc_port,
+                username=settings.msf_rpc_user,
+                password=settings.msf_rpc_pass,
+                ssl=settings.msf_rpc_ssl
+            )
+            
+            # Test connection
+            if metasploit_adapter.connect():
+                logger.info("✅ Metasploit RPC Connected Successfully")
+                version = metasploit_adapter.get_version()
+                exploits = metasploit_adapter.list_exploits()
+                logger.info(f"   Metasploit Version: {version}")
+                logger.info(f"   Available Modules: {len(exploits) if exploits else 0}")
+                
+                # Register for graceful shutdown
+                shutdown_manager.register(
+                    name="metasploit_adapter",
+                    shutdown_func=metasploit_adapter.disconnect,
+                    priority=40,
+                    timeout=10.0
+                )
+            else:
+                logger.error("❌ Failed to connect to Metasploit RPC")
+                logger.warning("   Falling back to SIMULATION mode")
+                metasploit_adapter = None
+        except Exception as e:
+            logger.error(f"❌ Metasploit initialization failed: {e}")
+            logger.warning("   Falling back to SIMULATION mode")
+            metasploit_adapter = None
+    else:
+        logger.info("🔵 Real Exploitation DISABLED (USE_REAL_EXPLOITS=false)")
+        logger.info("   System running in SIMULATION mode")
+    
+    # Store MetasploitAdapter in app state for global access
+    app.state.metasploit_adapter = metasploit_adapter
+    app.state.use_real_exploits = settings.use_real_exploits and metasploit_adapter is not None
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize C2 Session Manager
+    # ═══════════════════════════════════════════════════════════════
+    c2_manager = None
+    if settings.use_real_exploits:
+        try:
+            from ..exploitation.c2.session_manager import C2SessionManager
+            logger.info("🌐 Initializing C2 Session Manager...")
+            
+            c2_manager = C2SessionManager(
+                encryption_enabled=settings.c2_encryption_enabled,
+                data_dir=settings.c2_data_dir
+            )
+            
+            logger.info(f"✅ C2 Session Manager Initialized")
+            logger.info(f"   Encryption: {'Enabled (AES-256-GCM)' if settings.c2_encryption_enabled else 'Disabled'}")
+            logger.info(f"   Data Directory: {settings.c2_data_dir}")
+            
+            # Register for graceful shutdown
+            shutdown_manager.register(
+                name="c2_session_manager",
+                shutdown_func=c2_manager.cleanup_all_sessions,
+                priority=35,
+                timeout=15.0
+            )
+        except Exception as e:
+            logger.error(f"❌ C2 Session Manager initialization failed: {e}")
+            c2_manager = None
+    
+    # Store C2SessionManager in app state
+    app.state.c2_manager = c2_manager
     
     # Initialize Knowledge Base (in-memory, fast)
     knowledge = init_knowledge(data_path=settings.knowledge_data_path)
@@ -229,6 +311,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
+    app.include_router(exploitation_router, prefix="/api/v1")
     app.include_router(websocket_router)
     
     return app
