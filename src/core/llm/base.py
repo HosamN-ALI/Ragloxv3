@@ -90,6 +90,7 @@ class ProviderType(str, Enum):
     OPENAI = "openai"
     LOCAL = "local"
     ANTHROPIC = "anthropic"
+    BLACKBOX = "blackbox"
     MOCK = "mock"
 
 

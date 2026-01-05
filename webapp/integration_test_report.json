@@ -1,0 +1,731 @@
+{
+  "timestamp": "2026-01-04T04:57:20.558350",
+  "api_base": "http://172.245.232.188:8000",
+  "suites": [
+    {
+      "name": "Health & Root Endpoints",
+      "passed": 2,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "Root endpoint returns API info",
+          "status": "PASSED",
+          "duration_ms": 6.23631477355957,
+          "endpoint": "GET /",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "version": "3.0.0",
+            "status": "operational"
+          }
+        },
+        {
+          "name": "Health check returns healthy status",
+          "status": "PASSED",
+          "duration_ms": 1.4963150024414062,
+          "endpoint": "GET /health",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "status": "healthy",
+            "components": {
+              "api": "healthy",
+              "blackboard": "healthy",
+              "knowledge": "loaded"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mission CRUD Operations",
+      "passed": 7,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "List missions returns array",
+          "status": "PASSED",
+          "duration_ms": 1.0635852813720703,
+          "endpoint": "GET /api/v1/missions",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 265,
+            "type": "list"
+          }
+        },
+        {
+          "name": "Create mission with valid data",
+          "status": "PASSED",
+          "duration_ms": 2.4442672729492188,
+          "endpoint": "POST /api/v1/missions",
+          "expected": "201 Created",
+          "actual": "201 Created",
+          "error": null,
+          "details": {
+            "mission_id": "628fa881-f608-4de1-97cd-0e47aa046c80",
+            "status": "created"
+          }
+        },
+        {
+          "name": "Create mission rejects empty payload (validation)",
+          "status": "PASSED",
+          "duration_ms": 1.085042953491211,
+          "endpoint": "POST /api/v1/missions",
+          "expected": "422 Validation Error",
+          "actual": "422 Validation Error",
+          "error": null,
+          "details": {
+            "detail": [
+              {
+                "type": "missing",
+                "loc": [
+                  "body",
+                  "name"
+                ],
+                "msg": "Field required",
+                "input": {}
+              },
+              {
+                "type": "missing",
+                "loc": [
+                  "body",
+                  "scope"
+                ],
+                "msg": "Field required",
+                "input": {}
+              },
+              {
+                "type": "missing",
+                "loc": [
+                  "body",
+                  "goals"
+                ],
+                "msg": "Field required",
+                "input": {}
+              }
+            ]
+          }
+        },
+        {
+          "name": "Create mission rejects empty scope",
+          "status": "PASSED",
+          "duration_ms": 1.4576911926269531,
+          "endpoint": "POST /api/v1/missions",
+          "expected": "422 Validation Error",
+          "actual": "422 Validation Error",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Get mission details by ID",
+          "status": "PASSED",
+          "duration_ms": 2.0384788513183594,
+          "endpoint": "GET /api/v1/missions/{id}",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "mission_id": "628fa881-f608-4de1-97cd-0e47aa046c80",
+            "status": "created"
+          }
+        },
+        {
+          "name": "Get non-existent mission returns 404",
+          "status": "PASSED",
+          "duration_ms": 1.0313987731933594,
+          "endpoint": "GET /api/v1/missions/{fake_id}",
+          "expected": "404 Not Found",
+          "actual": "404 Not Found",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Get mission with invalid UUID format",
+          "status": "PASSED",
+          "duration_ms": 0.8575916290283203,
+          "endpoint": "GET /api/v1/missions/invalid-uuid",
+          "expected": "422 (422 or 404 acceptable)",
+          "actual": "422 (422 or 404 acceptable)",
+          "error": null,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Mission Lifecycle (Start/Pause/Resume/Stop)",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "Start mission",
+          "status": "PASSED",
+          "duration_ms": 10.550498962402344,
+          "endpoint": "POST /api/v1/missions/52004f0e-bb12-4aae-bf2f-349a9137bb48/start",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "status": "running"
+          }
+        },
+        {
+          "name": "Pause running mission",
+          "status": "PASSED",
+          "duration_ms": 6.790637969970703,
+          "endpoint": "POST /api/v1/missions/52004f0e-bb12-4aae-bf2f-349a9137bb48/pause",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "status": "paused"
+          }
+        },
+        {
+          "name": "Resume paused mission",
+          "status": "PASSED",
+          "duration_ms": 6.361722946166992,
+          "endpoint": "POST /api/v1/missions/52004f0e-bb12-4aae-bf2f-349a9137bb48/resume",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "status": "running"
+          }
+        },
+        {
+          "name": "Stop running mission",
+          "status": "PASSED",
+          "duration_ms": 6.805658340454102,
+          "endpoint": "POST /api/v1/missions/52004f0e-bb12-4aae-bf2f-349a9137bb48/stop",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "status": "stopped"
+          }
+        },
+        {
+          "name": "Start non-existent mission returns 404",
+          "status": "PASSED",
+          "duration_ms": 2.311229705810547,
+          "endpoint": "POST /api/v1/missions/{fake_id}/start",
+          "expected": "404 Not Found",
+          "actual": "404 Not Found",
+          "error": null,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Mission Data Endpoints (Targets, Vulns, Creds, Sessions, Stats)",
+      "passed": 6,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "List targets for mission",
+          "status": "PASSED",
+          "duration_ms": 2.0210742950439453,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/targets",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 0,
+            "type": "list"
+          }
+        },
+        {
+          "name": "List vulnerabilities for mission",
+          "status": "PASSED",
+          "duration_ms": 2.0008087158203125,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/vulnerabilities",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "name": "List credentials for mission",
+          "status": "PASSED",
+          "duration_ms": 2.016305923461914,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/credentials",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "name": "List sessions for mission",
+          "status": "PASSED",
+          "duration_ms": 2.4595260620117188,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/sessions",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "name": "Get mission statistics",
+          "status": "PASSED",
+          "duration_ms": 5.652904510498047,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/stats",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "keys": [
+              "targets_discovered",
+              "vulns_found",
+              "creds_harvested",
+              "sessions_established",
+              "goals_achieved",
+              "goals_total",
+              "completion_percentage"
+            ]
+          }
+        },
+        {
+          "name": "List targets for non-existent mission",
+          "status": "PASSED",
+          "duration_ms": 1.216888427734375,
+          "endpoint": "GET /api/v1/missions/00000000-0000-0000-0000-000000000002/targets",
+          "expected": "404 Not Found",
+          "actual": "404 Not Found",
+          "error": null,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Chat API",
+      "passed": 6,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "Send chat message",
+          "status": "PASSED",
+          "duration_ms": 5100.32057762146,
+          "endpoint": "POST /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/chat",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "id": "0338d2a8-1d4e-4f68-90a1-777eaaa71dc9",
+            "role": "user"
+          }
+        },
+        {
+          "name": "Get chat history",
+          "status": "PASSED",
+          "duration_ms": 3.8917064666748047,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/chat",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 2,
+            "has_system_response": true
+          }
+        },
+        {
+          "name": "Send 'status' command via chat",
+          "status": "PASSED",
+          "duration_ms": 5.363702774047852,
+          "endpoint": "POST /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/chat",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Send 'help' command via chat",
+          "status": "PASSED",
+          "duration_ms": 6.220817565917969,
+          "endpoint": "POST /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/chat",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Chat rejects empty content",
+          "status": "PASSED",
+          "duration_ms": 1.5320777893066406,
+          "endpoint": "POST /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/chat",
+          "expected": "422 Validation Error",
+          "actual": "422 Validation Error",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Get chat history with limit",
+          "status": "PASSED",
+          "duration_ms": 2.823352813720703,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/chat?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5,
+            "limit_respected": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approvals (HITL) API",
+      "passed": 4,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "List pending approvals",
+          "status": "PASSED",
+          "duration_ms": 1.9266605377197266,
+          "endpoint": "GET /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/approvals",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "name": "Approve non-existent action returns 404",
+          "status": "PASSED",
+          "duration_ms": 4.790544509887695,
+          "endpoint": "POST /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/approve/{fake_id}",
+          "expected": "404 Not Found",
+          "actual": "404 Not Found",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Reject non-existent action returns 404",
+          "status": "PASSED",
+          "duration_ms": 2.363920211791992,
+          "endpoint": "POST /api/v1/missions/628fa881-f608-4de1-97cd-0e47aa046c80/reject/{fake_id}",
+          "expected": "404 Not Found",
+          "actual": "404 Not Found",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "List approvals for non-existent mission",
+          "status": "PASSED",
+          "duration_ms": 1.2249946594238281,
+          "endpoint": "GET /api/v1/missions/{fake_id}/approvals",
+          "expected": "404 Not Found",
+          "actual": "404 Not Found",
+          "error": null,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Knowledge Base API",
+      "passed": 12,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "Get knowledge base statistics",
+          "status": "PASSED",
+          "duration_ms": 1.3039112091064453,
+          "endpoint": "GET /api/v1/knowledge/stats",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "total_techniques": 327,
+            "total_rx_modules": 1761,
+            "total_nuclei_templates": 11927
+          }
+        },
+        {
+          "name": "List techniques with pagination",
+          "status": "PASSED",
+          "duration_ms": 1.6193389892578125,
+          "endpoint": "GET /api/v1/knowledge/techniques?limit=10",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 10
+          }
+        },
+        {
+          "name": "List all tactics",
+          "status": "PASSED",
+          "duration_ms": 2.0194053649902344,
+          "endpoint": "GET /api/v1/knowledge/tactics",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 14
+          }
+        },
+        {
+          "name": "List modules with pagination",
+          "status": "PASSED",
+          "duration_ms": 1.6713142395019531,
+          "endpoint": "GET /api/v1/knowledge/modules?limit=10",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 10
+          }
+        },
+        {
+          "name": "List all platforms",
+          "status": "PASSED",
+          "duration_ms": 1.3968944549560547,
+          "endpoint": "GET /api/v1/knowledge/platforms",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "platforms": [
+              "windows",
+              "linux",
+              "macos",
+              "containers",
+              "google-workspace"
+            ]
+          }
+        },
+        {
+          "name": "Search modules by query",
+          "status": "PASSED",
+          "duration_ms": 4.822731018066406,
+          "endpoint": "GET /api/v1/knowledge/search?q=credential&limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "results": 5
+          }
+        },
+        {
+          "name": "Search rejects empty query",
+          "status": "PASSED",
+          "duration_ms": 1.5716552734375,
+          "endpoint": "GET /api/v1/knowledge/search?q=",
+          "expected": "422 Validation Error",
+          "actual": "422 Validation Error",
+          "error": null,
+          "details": {}
+        },
+        {
+          "name": "Get specific technique by ID",
+          "status": "PASSED",
+          "duration_ms": 2.552032470703125,
+          "endpoint": "GET /api/v1/knowledge/techniques/{id}",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "id": "T1001.002",
+            "name": "Data Obfuscation via Steganography"
+          }
+        },
+        {
+          "name": "Get exploit modules",
+          "status": "PASSED",
+          "duration_ms": 2.5479793548583984,
+          "endpoint": "GET /api/v1/knowledge/exploit-modules?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get recon modules",
+          "status": "PASSED",
+          "duration_ms": 3.9343833923339844,
+          "endpoint": "GET /api/v1/knowledge/recon-modules?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get credential modules",
+          "status": "PASSED",
+          "duration_ms": 1.4052391052246094,
+          "endpoint": "GET /api/v1/knowledge/credential-modules?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get privilege escalation modules",
+          "status": "PASSED",
+          "duration_ms": 2.0461082458496094,
+          "endpoint": "GET /api/v1/knowledge/privesc-modules?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        }
+      ]
+    },
+    {
+      "name": "Nuclei Templates API",
+      "passed": 8,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "List Nuclei templates with pagination",
+          "status": "PASSED",
+          "duration_ms": 1.6453266143798828,
+          "endpoint": "GET /api/v1/knowledge/nuclei/templates?limit=10",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 10
+          }
+        },
+        {
+          "name": "Search Nuclei templates",
+          "status": "PASSED",
+          "duration_ms": 21.567583084106445,
+          "endpoint": "GET /api/v1/knowledge/nuclei/search?q=cve&limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get critical severity templates",
+          "status": "PASSED",
+          "duration_ms": 4.116058349609375,
+          "endpoint": "GET /api/v1/knowledge/nuclei/critical?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get templates by severity (high)",
+          "status": "PASSED",
+          "duration_ms": 1.394510269165039,
+          "endpoint": "GET /api/v1/knowledge/nuclei/severity/high?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get RCE vulnerability templates",
+          "status": "PASSED",
+          "duration_ms": 1.3127326965332031,
+          "endpoint": "GET /api/v1/knowledge/nuclei/rce?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get SQL injection templates",
+          "status": "PASSED",
+          "duration_ms": 1.1217594146728516,
+          "endpoint": "GET /api/v1/knowledge/nuclei/sqli?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get XSS vulnerability templates",
+          "status": "PASSED",
+          "duration_ms": 1.2073516845703125,
+          "endpoint": "GET /api/v1/knowledge/nuclei/xss?limit=5",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "count": 5
+          }
+        },
+        {
+          "name": "Get specific Nuclei template by ID",
+          "status": "PASSED",
+          "duration_ms": 2.9234886169433594,
+          "endpoint": "GET /api/v1/knowledge/nuclei/templates/{id}",
+          "expected": "200 OK",
+          "actual": "200 OK",
+          "error": null,
+          "details": {
+            "template_id": "CVE-2018-19518",
+            "name": "PHP imap - Remote Command Execution"
+          }
+        }
+      ]
+    },
+    {
+      "name": "WebSocket Connection",
+      "passed": 1,
+      "failed": 0,
+      "warnings": 0,
+      "results": [
+        {
+          "name": "WebSocket connection to mission",
+          "status": "PASSED",
+          "duration_ms": 14.482736587524414,
+          "endpoint": "ws://.../ws/missions/628fa881-f608-4de1-97cd-0e47aa046c80",
+          "expected": "Connected",
+          "actual": "Connected",
+          "error": null,
+          "details": {
+            "url": "ws://172.245.232.188:8000/ws/missions/628fa881-f608-4de1-97cd-0e47aa046c80"
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_tests": 51,
+    "passed": 51,
+    "failed": 0,
+    "pass_rate": "100.0%"
+  }
+}

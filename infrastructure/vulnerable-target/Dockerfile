@@ -60,7 +60,7 @@ RUN useradd -m -s /bin/bash admin && \
     usermod -aG sudo admin
 
 # User 3: backup:backup (weak service account)
-RUN useradd -m -s /bin/bash backup && \
+RUN useradd -m -s /bin/bash backup 2>/dev/null || true && \
     echo 'backup:backup' | chpasswd
 
 # Set root password (very weak for testing)

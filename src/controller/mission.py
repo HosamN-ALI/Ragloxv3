@@ -76,6 +76,11 @@ class MissionController:
         # Monitor interval (seconds)
         self._monitor_interval = 5
         
+        # Task Watchdog settings
+        self._watchdog_interval = 30  # Check every 30 seconds
+        self._task_timeout = timedelta(minutes=5)  # Tasks stale after 5 minutes
+        self._max_task_retries = 3  # Max retries before marking FAILED
+        
         # HITL: Pending approval actions
         self._pending_approvals: Dict[str, ApprovalAction] = {}
         
@@ -181,6 +186,7 @@ class MissionController:
         if not self._running:
             self._running = True
             asyncio.create_task(self._monitor_loop())
+            asyncio.create_task(self._watchdog_loop())  # Start Task Watchdog
         
         self.logger.info(f"Mission {mission_id} started successfully")
         return True
@@ -261,32 +267,42 @@ class MissionController:
         """
         self.logger.info(f"Stopping mission: {mission_id}")
         
-        mission_data = await self.blackboard.get_mission(mission_id)
-        if not mission_data:
-            return False
-        
-        # Update status to completing
-        await self.blackboard.update_mission_status(mission_id, MissionStatus.COMPLETING)
-        
-        # Send stop command to specialists
-        await self._send_control_command(mission_id, "stop")
-        
-        # Stop specialists
-        await self._stop_specialists(mission_id)
-        
-        # Update status to completed
-        await self.blackboard.update_mission_status(mission_id, MissionStatus.COMPLETED)
-        
-        # Clean up local tracking
-        if mission_id in self._active_missions:
-            del self._active_missions[mission_id]
-        
-        self.logger.info(f"Mission {mission_id} stopped")
-        return True
+        try:
+            mission_data = await self.blackboard.get_mission(mission_id)
+            if not mission_data:
+                return False
+            
+            # Update status to completing
+            await self.blackboard.update_mission_status(mission_id, MissionStatus.COMPLETING)
+            
+            # Send stop command to specialists
+            await self._send_control_command(mission_id, "stop")
+            
+            # Update status to stopped BEFORE stopping specialists
+            # This is important because _stop_specialists calls blackboard.disconnect()
+            # on the shared blackboard instance, which would cause subsequent
+            # blackboard operations to fail
+            await self.blackboard.update_mission_status(mission_id, MissionStatus.STOPPED)
+            
+            # Clean up local tracking
+            if mission_id in self._active_missions:
+                del self._active_missions[mission_id]
+            
+            # Stop specialists (this disconnects their blackboard connections)
+            await self._stop_specialists(mission_id)
+            
+            self.logger.info(f"Mission {mission_id} stopped")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error stopping mission {mission_id}: {e}")
+            # Re-raise to allow the API layer to handle it properly
+            raise
     
     async def get_mission_status(self, mission_id: str) -> Optional[Dict[str, Any]]:
         """
         Get comprehensive mission status.
+        
+        First tries to get mission from Redis, then falls back to local cache.
         
         Args:
             mission_id: Mission ID
@@ -295,7 +311,40 @@ class MissionController:
             Status dictionary
         """
         mission_data = await self.blackboard.get_mission(mission_id)
+        
+        # If not in Redis, check local cache (for in-memory missions)
         if not mission_data:
+            if mission_id in self._active_missions:
+                local_mission = self._active_missions[mission_id]
+                mission = local_mission.get("mission")
+                if mission:
+                    # Reconstruct from local cache
+                    goals_dict = {}
+                    if hasattr(mission, 'goals'):
+                        goals_dict = {
+                            k: v.value if hasattr(v, 'value') else str(v) 
+                            for k, v in mission.goals.items()
+                        }
+                    
+                    return {
+                        "mission_id": mission_id,
+                        "name": getattr(mission, 'name', 'Unknown'),
+                        "status": local_mission.get("status", MissionStatus.CREATED).value if hasattr(local_mission.get("status"), 'value') else str(local_mission.get("status", "unknown")),
+                        "scope": getattr(mission, 'scope', []),
+                        "goals": goals_dict,
+                        "statistics": {
+                            "targets_discovered": 0,
+                            "vulns_found": 0,
+                            "creds_harvested": 0,
+                            "sessions_established": 0,
+                            "goals_achieved": 0
+                        },
+                        "target_count": 0,
+                        "vuln_count": 0,
+                        "created_at": local_mission.get("created_at", datetime.utcnow()).isoformat() if hasattr(local_mission.get("created_at"), 'isoformat') else str(local_mission.get("created_at")),
+                        "started_at": None,
+                        "completed_at": None
+                    }
             return None
         
         # Get statistics
@@ -339,8 +388,9 @@ class MissionController:
         self.logger.info(f"Starting specialists for mission {mission_id}")
         
         # Create and start Recon specialist
+        # Each specialist gets its own Blackboard instance to avoid connection conflicts
         recon = ReconSpecialist(
-            blackboard=self.blackboard,
+            blackboard=Blackboard(settings=self.settings),
             settings=self.settings
         )
         await recon.start(mission_id)
@@ -348,7 +398,7 @@ class MissionController:
         
         # Create and start Attack specialist
         attack = AttackSpecialist(
-            blackboard=self.blackboard,
+            blackboard=Blackboard(settings=self.settings),
             settings=self.settings
         )
         await attack.start(mission_id)
@@ -487,6 +537,110 @@ class MissionController:
             self.logger.warning(f"No heartbeats for mission {mission_id}")
     
     # ═══════════════════════════════════════════════════════════
+    # Task Watchdog (Zombie Task Hunter)
+    # ═══════════════════════════════════════════════════════════
+    
+    async def _watchdog_loop(self) -> None:
+        """
+        Background task that monitors for zombie/stale tasks.
+        
+        Runs periodically to detect tasks that are:
+        - Status: RUNNING but haven't been updated for too long
+        - Likely abandoned by a crashed specialist
+        
+        Actions:
+        - Re-queue task if retry count < max_retries
+        - Mark as FAILED if retry count >= max_retries
+        """
+        self.logger.info("🐕 Task Watchdog started")
+        
+        while self._running and self._active_missions:
+            try:
+                for mission_id in list(self._active_missions.keys()):
+                    await self._check_zombie_tasks(mission_id)
+                
+                await asyncio.sleep(self._watchdog_interval)
+                
+            except Exception as e:
+                self.logger.error(f"Error in watchdog loop: {e}")
+                await asyncio.sleep(5)
+        
+        self.logger.info("🐕 Task Watchdog stopped")
+    
+    async def _check_zombie_tasks(self, mission_id: str) -> None:
+        """
+        Check for and recover zombie tasks in a mission.
+        
+        A zombie task is one that:
+        - Has status RUNNING
+        - Has not been updated within the timeout period
+        
+        Args:
+            mission_id: Mission ID to check
+        """
+        try:
+            # Get all running tasks
+            running_tasks = await self.blackboard.get_running_tasks(mission_id)
+            
+            if not running_tasks:
+                return
+            
+            now = datetime.utcnow()
+            zombies_found = 0
+            
+            for task_key in running_tasks:
+                task_id = task_key.replace("task:", "")
+                task = await self.blackboard.get_task(task_id)
+                
+                if not task:
+                    continue
+                
+                # Check last update time
+                updated_at_str = task.get("updated_at") or task.get("started_at")
+                if not updated_at_str:
+                    continue
+                
+                try:
+                    updated_at = datetime.fromisoformat(updated_at_str)
+                except ValueError:
+                    self.logger.warning(f"Invalid timestamp for task {task_id}: {updated_at_str}")
+                    continue
+                
+                # Check if task is stale
+                if now - updated_at > self._task_timeout:
+                    zombies_found += 1
+                    retry_count = int(task.get("retry_count", 0))
+                    
+                    if retry_count < self._max_task_retries:
+                        # Re-queue the task
+                        self.logger.warning(
+                            f"🧟 Zombie task detected: {task_id} "
+                            f"(stale for {now - updated_at}). Re-queuing (attempt {retry_count + 1}/{self._max_task_retries})"
+                        )
+                        await self.blackboard.requeue_task(
+                            mission_id=mission_id,
+                            task_id=task_id,
+                            reason=f"watchdog_timeout_after_{(now - updated_at).total_seconds():.0f}s"
+                        )
+                    else:
+                        # Mark as permanently failed
+                        self.logger.error(
+                            f"💀 Task {task_id} exceeded max retries ({self._max_task_retries}). "
+                            f"Marking as FAILED."
+                        )
+                        await self.blackboard.mark_task_failed_permanently(
+                            mission_id=mission_id,
+                            task_id=task_id,
+                            reason=f"max_retries_exceeded_after_{retry_count}_attempts"
+                        )
+            
+            if zombies_found > 0:
+                self.logger.info(f"🐕 Watchdog processed {zombies_found} zombie task(s) for mission {mission_id}")
+                
+        except Exception as e:
+            self.logger.error(f"Error checking zombie tasks: {e}")
+    
+    # ═══════════════════════════════════════════════════════════
     # Utility Methods
     # ═══════════════════════════════════════════════════════════
     
@@ -547,7 +701,7 @@ class MissionController:
         
         # Publish to blackboard for WebSocket broadcast
         channel = self.blackboard.get_channel(mission_id, "approvals")
-        await self.blackboard.publish_event(channel, event)
+        await self.blackboard.publish(channel, event)
         
         self.logger.info(f"⏳ Mission {mission_id} waiting for approval: {action_id}")
         
@@ -607,7 +761,7 @@ class MissionController:
         )
         
         channel = self.blackboard.get_channel(mission_id, "approvals")
-        await self.blackboard.publish_event(channel, response_event)
+        await self.blackboard.publish(channel, response_event)
         
         # Resume specialists
         await self._send_control_command(mission_id, "resume")
@@ -672,7 +826,7 @@ class MissionController:
         )
         
         channel = self.blackboard.get_channel(mission_id, "approvals")
-        await self.blackboard.publish_event(channel, response_event)
+        await self.blackboard.publish(channel, response_event)
         
         # Request AnalysisSpecialist to find alternative
         if action.task_id:
@@ -773,7 +927,7 @@ class MissionController:
         )
         
         channel = self.blackboard.get_channel(mission_id, "analysis")
-        await self.blackboard.publish_event(channel, event)
+        await self.blackboard.publish(channel, event)
         
         self.logger.info(f"Requested alternative analysis after rejection")
     
@@ -835,7 +989,11 @@ class MissionController:
         )
         
         channel = self.blackboard.get_channel(mission_id, "chat")
-        await self.blackboard.publish_event(channel, event)
+        # Use publish_dict instead of publish for Pydantic models if publish is not available
+        if hasattr(self.blackboard, 'publish'):
+            await self.blackboard.publish(channel, event)
+        else:
+            await self.blackboard.publish_dict(channel, event.model_dump())
         
         # Process the message and generate response
         response = await self._process_chat_message(mission_id, message)
@@ -852,7 +1010,10 @@ class MissionController:
                 related_task_id=response.related_task_id,
                 related_action_id=response.related_action_id
             )
-            await self.blackboard.publish_event(channel, response_event)
+            if hasattr(self.blackboard, 'publish'):
+                await self.blackboard.publish(channel, response_event)
+            else:
+                await self.blackboard.publish_dict(channel, response_event.model_dump())
         
         return message
     
@@ -888,13 +1049,12 @@ class MissionController:
         """
         Process a chat message and generate a system response.
         
-        This is where we can integrate LLM for intelligent responses.
+        Uses LLM for intelligent responses with fallback to simple commands.
         """
         content = message.content.lower()
-        
-        # Simple command parsing
         response_content = None
         
+        # Check for simple commands first (fast path)
         if "status" in content:
             status = await self.get_mission_status(mission_id)
             if status:
@@ -930,14 +1090,13 @@ class MissionController:
                 "  - 'pause': Pause the mission\n"
                 "  - 'resume': Resume the mission\n"
                 "  - 'pending': List pending approvals\n"
-                "  - 'help': Show this help message"
+                "  - 'help': Show this help message\n"
+                "\nYou can also ask me anything about the mission!"
             )
         
         else:
-            response_content = (
-                f"🤖 Received your message. "
-                f"Use 'help' to see available commands."
-            )
+            # Use LLM for general questions
+            response_content = await self._get_llm_response(mission_id, message.content)
         
         if response_content:
             return ChatMessage(
@@ -949,6 +1108,73 @@ class MissionController:
             )
         
         return None
+    
+    async def _get_llm_response(self, mission_id: str, user_message: str) -> str:
+        """
+        Get LLM response for a chat message.
+        
+        Args:
+            mission_id: Mission ID
+            user_message: User's message
+            
+        Returns:
+            LLM response or fallback message
+        """
+        try:
+            from ..core.llm.service import get_llm_service
+            from ..core.llm.base import LLMMessage, MessageRole
+            
+            llm_service = get_llm_service()
+            
+            if not llm_service or not llm_service.providers:
+                self.logger.warning("LLM service not available, using fallback")
+                return f"🤖 Received your message: '{user_message}'. Use 'help' to see available commands."
+            
+            # Get mission context
+            status = await self.get_mission_status(mission_id)
+            mission_context = ""
+            if status:
+                mission_context = f"""
+Current Mission Status:
+- Name: {status.get('name', 'Unknown')}
+- Status: {status.get('status', 'unknown')}
+- Targets: {status.get('target_count', 0)}
+- Vulnerabilities: {status.get('vuln_count', 0)}
+- Goals: {status.get('statistics', {}).get('goals_achieved', 0)}/{len(status.get('goals', {}))}
+"""
+            
+            # Build messages
+            system_prompt = f"""You are RAGLOX, an AI-powered Red Team Automation assistant.
+You help operators manage and monitor penetration testing missions.
+
+{mission_context}
+
+Be concise, professional, and helpful. If asked about something outside your scope,
+politely redirect the user to relevant commands.
+
+Available commands the user can use:
+- 'status': Get mission status
+- 'pause': Pause the mission
+- 'resume': Resume the mission
+- 'pending': List pending approvals
+- 'help': Show help message"""
+
+            messages = [
+                LLMMessage(role=MessageRole.SYSTEM, content=system_prompt),
+                LLMMessage(role=MessageRole.USER, content=user_message)
+            ]
+            
+            # Get response from LLM
+            response = await llm_service.generate(messages)
+            
+            if response and response.content:
+                return f"🤖 {response.content}"
+            else:
+                return f"🤖 Received your message. Use 'help' to see available commands."
+                
+        except Exception as e:
+            self.logger.error(f"LLM error: {e}")
+            return f"🤖 Received your message: '{user_message}'. Use 'help' to see available commands."
     
     async def shutdown(self) -> None:
         """Shutdown the controller gracefully."""

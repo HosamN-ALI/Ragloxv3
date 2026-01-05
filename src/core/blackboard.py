@@ -128,11 +128,32 @@ class Blackboard:
         await self.redis.hset(key, mapping=serialized)
     
     async def _get_hash(self, key: str) -> Optional[Dict[str, Any]]:
-        """Get a hash from Redis."""
+        """
+        Get a hash from Redis and deserialize JSON fields.
+        
+        This method properly deserializes complex fields (lists, dicts) that were
+        JSON-serialized during _set_hash(). This ensures that when AttackSpecialist
+        retrieves a Vulnerability, fields like rx_modules and metadata are proper
+        Python objects, not JSON strings.
+        """
         data = await self.redis.hgetall(key)
         if not data:
             return None
-        return data
+        
+        # Deserialize JSON strings back to objects
+        deserialized = {}
+        for k, v in data.items():
+            # Try to parse as JSON if it looks like JSON
+            if isinstance(v, str) and v and (v.startswith('[') or v.startswith('{')):
+                try:
+                    deserialized[k] = json.loads(v)
+                except json.JSONDecodeError:
+                    # Not valid JSON, keep as string
+                    deserialized[k] = v
+            else:
+                deserialized[k] = v
+        
+        return deserialized
     
     async def _delete(self, key: str) -> None:
         """Delete a key from Redis."""
@@ -427,6 +448,49 @@ class Blackboard:
         """Get task by ID."""
         return await self._get_hash(f"task:{task_id}")
     
+    # ═══════════════════════════════════════════════════════════
+    # Lua Scripts for Atomic Operations
+    # ═══════════════════════════════════════════════════════════
+    
+    # Lua script for atomic task claiming
+    # This ensures that read + check + move + update is done atomically
+    CLAIM_TASK_LUA = """
+    local pending_key = KEYS[1]
+    local running_key = KEYS[2]
+    local specialist = ARGV[1]
+    local worker_id = ARGV[2]
+    local started_at = ARGV[3]
+    local running_status = ARGV[4]
+    
+    -- Get all pending tasks sorted by priority (highest first)
+    local tasks = redis.call('ZREVRANGE', pending_key, 0, -1)
+    
+    for i, task_key in ipairs(tasks) do
+        -- Get task specialist type
+        local task_specialist = redis.call('HGET', task_key, 'specialist')
+        
+        if task_specialist == specialist then
+            -- Atomically move from pending to running
+            redis.call('ZREM', pending_key, task_key)
+            redis.call('SADD', running_key, task_key)
+            
+            -- Update task status, assignment, and timestamp
+            redis.call('HSET', task_key, 
+                'status', running_status,
+                'assigned_to', worker_id,
+                'started_at', started_at,
+                'updated_at', started_at
+            )
+            
+            -- Return task key (e.g., "task:uuid")
+            return task_key
+        end
+    end
+    
+    -- No matching task found
+    return nil
+    """
+    
     async def claim_task(
         self,
         mission_id: str,
@@ -434,7 +498,16 @@ class Blackboard:
         specialist: str
     ) -> Optional[str]:
         """
-        Claim a pending task for a worker.
+        Claim a pending task for a worker atomically.
+        
+        Uses a Lua script to ensure the entire operation is atomic:
+        - Read task from pending queue
+        - Check if task matches specialist type
+        - Move task from pending to running
+        - Update task status and assignment
+        
+        This prevents race conditions where multiple workers
+        could claim the same task.
         
         Args:
             mission_id: Mission ID
@@ -444,31 +517,44 @@ class Blackboard:
         Returns:
             Task ID if claimed, None if no tasks available
         """
-        # Get highest priority task for this specialist
         pending_key = f"mission:{mission_id}:tasks:pending"
         running_key = f"mission:{mission_id}:tasks:running"
+        started_at = datetime.utcnow().isoformat()
         
-        # Get all pending tasks
-        tasks = await self.redis.zrevrange(pending_key, 0, -1)
+        # Execute atomic Lua script
+        result = await self.redis.eval(
+            self.CLAIM_TASK_LUA,
+            2,  # Number of keys
+            pending_key,
+            running_key,
+            specialist,
+            worker_id,
+            started_at,
+            TaskStatus.RUNNING.value
+        )
         
-        for task_key in tasks:
-            task = await self._get_hash(task_key)
-            if task and task.get("specialist") == specialist:
-                # Move to running
-                await self.redis.zrem(pending_key, task_key)
-                await self.redis.sadd(running_key, task_key)
-                
-                # Update task
-                task_id = task_key.replace("task:", "")
-                await self.redis.hset(f"task:{task_id}", mapping={
-                    "status": TaskStatus.RUNNING.value,
-                    "assigned_to": worker_id,
-                    "started_at": datetime.utcnow().isoformat(),
-                })
-                
-                return task_id
+        if result:
+            # Result is the task key (e.g., "task:uuid")
+            task_id = self._extract_task_id(result)
+            return task_id
         
         return None
+    
+    def _extract_task_id(self, task_key: Any) -> str:
+        """
+        Extract task ID from task key.
+        
+        Handles both string and bytes types returned by Redis.
+        
+        Args:
+            task_key: Task key from Redis (str or bytes)
+            
+        Returns:
+            Clean task ID without prefix
+        """
+        if isinstance(task_key, bytes):
+            task_key = task_key.decode()
+        return task_key.replace("task:", "") if isinstance(task_key, str) else str(task_key)
     
     async def complete_task(
         self,
@@ -544,6 +630,84 @@ class Blackboard:
                 result.append(task_key.replace("task:", ""))
         
         return result
+    
+    async def get_running_tasks(self, mission_id: str) -> List[str]:
+        """Get all running task IDs for a mission."""
+        running_key = f"mission:{mission_id}:tasks:running"
+        tasks = await self.redis.smembers(running_key)
+        return list(tasks) if tasks else []
+    
+    async def requeue_task(
+        self,
+        mission_id: str,
+        task_id: str,
+        reason: str = "watchdog_timeout"
+    ) -> None:
+        """
+        Re-queue a stale/zombie task back to pending.
+        
+        Used by the Task Watchdog to recover from stuck tasks.
+        
+        Args:
+            mission_id: Mission ID
+            task_id: Task ID to requeue
+            reason: Reason for requeuing
+        """
+        task_key = f"task:{task_id}"
+        running_key = f"mission:{mission_id}:tasks:running"
+        pending_key = f"mission:{mission_id}:tasks:pending"
+        
+        # Get current task data
+        task = await self._get_hash(task_key)
+        if not task:
+            return
+        
+        # Get current retry count
+        retry_count = int(task.get("retry_count", 0))
+        priority = int(task.get("priority", 5))
+        
+        # Move from running back to pending
+        await self.redis.srem(running_key, task_key)
+        await self.redis.zadd(pending_key, {task_key: priority})
+        
+        # Update task status
+        await self.redis.hset(task_key, mapping={
+            "status": TaskStatus.PENDING.value,
+            "assigned_to": "",
+            "retry_count": str(retry_count + 1),
+            "last_requeue_reason": reason,
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+    
+    async def mark_task_failed_permanently(
+        self,
+        mission_id: str,
+        task_id: str,
+        reason: str = "max_retries_exceeded"
+    ) -> None:
+        """
+        Mark a task as permanently failed (no more retries).
+        
+        Args:
+            mission_id: Mission ID
+            task_id: Task ID
+            reason: Failure reason
+        """
+        task_key = f"task:{task_id}"
+        running_key = f"mission:{mission_id}:tasks:running"
+        completed_key = f"mission:{mission_id}:tasks:completed"
+        
+        # Move from running to completed
+        await self.redis.srem(running_key, task_key)
+        await self.redis.lpush(completed_key, task_key)
+        
+        # Update task status
+        await self.redis.hset(task_key, mapping={
+            "status": TaskStatus.FAILED.value,
+            "completed_at": datetime.utcnow().isoformat(),
+            "result": "failure",
+            "error_message": reason,
+        })
     
     # ═══════════════════════════════════════════════════════════
     # Pub/Sub Operations

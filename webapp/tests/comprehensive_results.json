@@ -1,0 +1,140 @@
+{
+  "run_id": "d2bd7207-b8c4-45b3-b406-07af55449ae2",
+  "timestamp": "2026-01-04T23:44:43.911531",
+  "summary": {
+    "total": 16,
+    "passed": 8,
+    "failed": 4,
+    "partial": 4,
+    "errors": 0,
+    "success_rate": "50.0%"
+  },
+  "llm_usage": {
+    "total_llm_calls": 0,
+    "total_tokens": 0,
+    "llm_decision_rate": "7.1%",
+    "decision_accuracy": "78.6%",
+    "tokens_per_decision": "0.0",
+    "avg_latency_ms": "0.0"
+  },
+  "recommendations": [
+    "\u26a0\ufe0f LLM calls = 0: Ensure LLM integration is properly configured. Check AnalysisSpecialist._needs_llm_analysis() conditions.",
+    "\ud83d\udcca LLM Decision Rate: 7.1% - Consider relaxing _needs_llm_analysis() conditions to utilize LLM more often for better decisions.",
+    "\ud83d\udd34 ADVANCED Level: 0% pass rate - Focus on improving advanced capabilities before advancing.",
+    "\ud83d\udd27 llm_decision_making: 5 gaps identified - Prioritize improving llm_decision_making capabilities."
+  ],
+  "results": [
+    {
+      "name": "Basic Network Scan",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 309.97610092163086,
+      "actual": "Discovered 3 hosts"
+    },
+    {
+      "name": "Basic Port Scan",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 4147.769451141357,
+      "actual": "Found 10 open ports"
+    },
+    {
+      "name": "Basic Service Enumeration",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 425.33040046691895,
+      "actual": "Enumerated 4 services"
+    },
+    {
+      "name": "Basic CVE Exploitation",
+      "difficulty": "basic",
+      "outcome": "failed",
+      "duration_ms": 500.8275508880615,
+      "actual": "Exploit failed: Exploit failed"
+    },
+    {
+      "name": "LLM Decision - Network Errors",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 0.4825592041015625,
+      "actual": "Network error decisions: 100% correct"
+    },
+    {
+      "name": "Credential Harvesting",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 0.423431396484375,
+      "actual": "Harvested 2 credentials"
+    },
+    {
+      "name": "Lateral Movement",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 1.6236305236816406,
+      "actual": "Lateral movement to 2 target(s)"
+    },
+    {
+      "name": "Privilege Escalation",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 0.28443336486816406,
+      "actual": "Escalated to admin"
+    },
+    {
+      "name": "Multi-Step Attack Chain",
+      "difficulty": "intermediate",
+      "outcome": "partial",
+      "duration_ms": 3566.120147705078,
+      "actual": "Attack chain: 3/7 phases"
+    },
+    {
+      "name": "LLM Decision - Defense Detection",
+      "difficulty": "intermediate",
+      "outcome": "failed",
+      "duration_ms": 21756.457090377808,
+      "actual": "Defense decisions: 0% correct"
+    },
+    {
+      "name": "AV Evasion",
+      "difficulty": "advanced",
+      "outcome": "partial",
+      "duration_ms": 14852.611303329468,
+      "actual": "Correct decision but missing evasion detail"
+    },
+    {
+      "name": "EDR Evasion",
+      "difficulty": "advanced",
+      "outcome": "partial",
+      "duration_ms": 12632.60531425476,
+      "actual": "Correct decision but missing evasion detail"
+    },
+    {
+      "name": "Complex Multi-Factor Failure",
+      "difficulty": "advanced",
+      "outcome": "failed",
+      "duration_ms": 1.9030570983886719,
+      "actual": "Unexpected decision: skip"
+    },
+    {
+      "name": "Adaptive Retry Strategy",
+      "difficulty": "advanced",
+      "outcome": "failed",
+      "duration_ms": 1.4340877532958984,
+      "actual": "No adaptation observed"
+    },
+    {
+      "name": "APT Attack Simulation",
+      "difficulty": "expert",
+      "outcome": "passed",
+      "duration_ms": 2331.298351287842,
+      "actual": "APT simulation: 7/7 phases"
+    },
+    {
+      "name": "Stealth Operation",
+      "difficulty": "expert",
+      "outcome": "partial",
+      "duration_ms": 3900.184154510498,
+      "actual": "Stealth: 40%, 3 objectives"
+    }
+  ]
+}

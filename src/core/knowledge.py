@@ -103,6 +103,28 @@ class KnowledgeStats:
     modules_per_platform: Dict[str, int] = field(default_factory=dict)
     modules_per_executor: Dict[str, int] = field(default_factory=dict)
     memory_size_mb: float = 0.0
+    # Nuclei Templates stats
+    total_nuclei_templates: int = 0
+    nuclei_templates_per_severity: Dict[str, int] = field(default_factory=dict)
+    nuclei_templates_per_protocol: Dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class NucleiTemplate:
+    """Nuclei vulnerability scanning template."""
+    template_id: str
+    name: str
+    severity: str
+    description: str = ""
+    author: str = ""
+    tags: List[str] = field(default_factory=list)
+    reference: List[str] = field(default_factory=list)
+    cve_id: List[str] = field(default_factory=list)
+    cwe_id: List[str] = field(default_factory=list)
+    cvss_score: Optional[float] = None
+    cvss_metrics: str = ""
+    protocol: List[str] = field(default_factory=list)
+    file_path: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -166,6 +188,13 @@ class EmbeddedKnowledge:
         # Quick lookups from original data
         self._quick_index: Dict[str, Any] = {}
         
+        # Nuclei Templates indices
+        self._nuclei_templates: Dict[str, NucleiTemplate] = {}  # template_id -> NucleiTemplate
+        self._nuclei_by_severity: Dict[str, List[str]] = {}  # severity -> [template_ids]
+        self._nuclei_by_tag: Dict[str, List[str]] = {}  # tag -> [template_ids]
+        self._nuclei_by_cve: Dict[str, str] = {}  # cve_id -> template_id
+        self._nuclei_by_protocol: Dict[str, List[str]] = {}  # protocol -> [template_ids]
+        
         # Stats
         self._stats: Optional[KnowledgeStats] = None
         
@@ -194,6 +223,9 @@ class EmbeddedKnowledge:
             # Load threat library (techniques, tactics)
             library_loaded = self._load_threat_library()
             
+            # Load Nuclei templates
+            nuclei_loaded = self._load_nuclei_templates()
+            
             # Build secondary indices
             self._build_secondary_indices()
             
@@ -204,10 +236,11 @@ class EmbeddedKnowledge:
                 f"Knowledge base loaded: "
                 f"{len(self._rx_modules)} modules, "
                 f"{len(self._techniques)} techniques, "
-                f"{len(self._tactics)} tactics"
+                f"{len(self._tactics)} tactics, "
+                f"{len(self._nuclei_templates)} nuclei templates"
             )
             
-            return modules_loaded or library_loaded
+            return modules_loaded or library_loaded or nuclei_loaded
             
         except Exception as e:
             logger.error(f"Error loading knowledge base: {e}")
@@ -297,6 +330,7 @@ class EmbeddedKnowledge:
     def _load_threat_library(self) -> bool:
         """Load threat library (techniques, tactics) from raglox_threat_library.json."""
         library_file = self.data_path / "raglox_threat_library.json"
+        indexes_file = self.data_path / "raglox_indexes_v2.json"
         
         if not library_file.exists():
             logger.warning(f"Threat library not found: {library_file}")
@@ -306,14 +340,59 @@ class EmbeddedKnowledge:
             with open(library_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Parse tactics
+            # Load indexes for tactic-technique mapping
+            indexes_data = {}
+            if indexes_file.exists():
+                try:
+                    with open(indexes_file, 'r', encoding='utf-8') as f:
+                        indexes_data = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Could not load indexes file: {e}")
+            
+            # MITRE ATT&CK Tactic ID to name mapping
+            tactic_id_to_name = {
+                'TA0043': 'reconnaissance',
+                'TA0042': 'resource-development',
+                'TA0001': 'initial-access',
+                'TA0002': 'execution',
+                'TA0003': 'persistence',
+                'TA0004': 'privilege-escalation',
+                'TA0005': 'defense-evasion',
+                'TA0006': 'credential-access',
+                'TA0007': 'discovery',
+                'TA0008': 'lateral-movement',
+                'TA0009': 'collection',
+                'TA0011': 'command-and-control',
+                'TA0010': 'exfiltration',
+                'TA0040': 'impact',
+            }
+            
+            # Get by_tactic from indexes
+            by_tactic = indexes_data.get('by_tactic', {})
+            
+            # Parse tactics - Use data from indexes file if available
             for tactic_id, tactic_data in data.get('tactics', {}).items():
+                tactic_name = tactic_data.get('name', '')
+                technique_ids = tactic_data.get('techniques', [])
+                
+                # If techniques list is empty, try to get from indexes
+                if not technique_ids and tactic_name in by_tactic:
+                    tactic_info = by_tactic.get(tactic_name, {})
+                    technique_ids = tactic_info.get('techniques', [])
+                
+                # Also check by normalized name
+                if not technique_ids:
+                    normalized_name = tactic_id_to_name.get(tactic_id, tactic_name)
+                    if normalized_name in by_tactic:
+                        tactic_info = by_tactic.get(normalized_name, {})
+                        technique_ids = tactic_info.get('techniques', [])
+                
                 self._tactics[tactic_id] = Tactic(
                     id=tactic_id,
-                    name=tactic_data.get('name', ''),
-                    technique_ids=tactic_data.get('techniques', [])
+                    name=tactic_name,
+                    technique_ids=technique_ids
                 )
-                self._tactic_to_techniques[tactic_id] = tactic_data.get('techniques', [])
+                self._tactic_to_techniques[tactic_id] = technique_ids
             
             # Parse techniques
             for tech_id, tech_data in data.get('techniques', {}).items():
@@ -330,15 +409,88 @@ class EmbeddedKnowledge:
                     test_count=len(tests)
                 )
             
+            # Log stats about tactic-technique mapping
+            tactics_with_techniques = sum(1 for t in self._tactics.values() if t.technique_ids)
+            total_technique_mappings = sum(len(t.technique_ids) for t in self._tactics.values())
+            
             logger.info(
                 f"Loaded threat library: "
-                f"{len(self._tactics)} tactics, "
+                f"{len(self._tactics)} tactics ({tactics_with_techniques} with techniques, {total_technique_mappings} mappings), "
                 f"{len(self._techniques)} techniques"
             )
             return True
             
         except Exception as e:
             logger.error(f"Error loading threat library: {e}")
+            return False
+    
+    def _load_nuclei_templates(self) -> bool:
+        """Load Nuclei templates from raglox_nuclei_templates.json."""
+        nuclei_file = self.data_path / "raglox_nuclei_templates.json"
+        
+        if not nuclei_file.exists():
+            logger.warning(f"Nuclei templates index not found: {nuclei_file}")
+            return False
+        
+        try:
+            with open(nuclei_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Parse templates
+            for template_data in data.get('templates', []):
+                template = NucleiTemplate(
+                    template_id=template_data.get('template_id', ''),
+                    name=template_data.get('name', ''),
+                    severity=template_data.get('severity', 'unknown'),
+                    description=template_data.get('description', ''),
+                    author=template_data.get('author', ''),
+                    tags=template_data.get('tags', []),
+                    reference=template_data.get('reference', []),
+                    cve_id=template_data.get('cve_id', []),
+                    cwe_id=template_data.get('cwe_id', []),
+                    cvss_score=template_data.get('cvss_score'),
+                    cvss_metrics=template_data.get('cvss_metrics', ''),
+                    protocol=template_data.get('protocol', []),
+                    file_path=template_data.get('file_path', '')
+                )
+                
+                if template.template_id:
+                    self._nuclei_templates[template.template_id] = template
+                    
+                    # Index by severity
+                    severity = template.severity.lower()
+                    if severity not in self._nuclei_by_severity:
+                        self._nuclei_by_severity[severity] = []
+                    self._nuclei_by_severity[severity].append(template.template_id)
+                    
+                    # Index by tags
+                    for tag in template.tags:
+                        tag_lower = tag.lower().strip()
+                        if tag_lower:
+                            if tag_lower not in self._nuclei_by_tag:
+                                self._nuclei_by_tag[tag_lower] = []
+                            self._nuclei_by_tag[tag_lower].append(template.template_id)
+                    
+                    # Index by CVE
+                    cve_ids = template.cve_id
+                    # Handle both string and list formats
+                    if isinstance(cve_ids, str):
+                        cve_ids = [cve_ids] if cve_ids else []
+                    for cve in cve_ids:
+                        if cve and isinstance(cve, str):
+                            self._nuclei_by_cve[cve.upper()] = template.template_id
+                    
+                    # Index by protocol
+                    for protocol in template.protocol:
+                        if protocol not in self._nuclei_by_protocol:
+                            self._nuclei_by_protocol[protocol] = []
+                        self._nuclei_by_protocol[protocol].append(template.template_id)
+            
+            logger.info(f"Loaded {len(self._nuclei_templates)} Nuclei templates")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading Nuclei templates: {e}")
             return False
     
     def _build_secondary_indices(self) -> None:
@@ -373,9 +525,24 @@ class EmbeddedKnowledge:
             for executor, modules in self._executor_to_modules.items()
         }
         
+        # Nuclei stats
+        nuclei_per_severity = {
+            severity: len(templates)
+            for severity, templates in self._nuclei_by_severity.items()
+        }
+        
+        nuclei_per_protocol = {
+            protocol: len(templates)
+            for protocol, templates in self._nuclei_by_protocol.items()
+        }
+        
         # Estimate memory size (rough approximation)
         import sys
-        memory_bytes = sys.getsizeof(self._rx_modules) + sys.getsizeof(self._techniques)
+        memory_bytes = (
+            sys.getsizeof(self._rx_modules) + 
+            sys.getsizeof(self._techniques) +
+            sys.getsizeof(self._nuclei_templates)
+        )
         memory_mb = memory_bytes / (1024 * 1024)
         
         self._stats = KnowledgeStats(
@@ -385,7 +552,10 @@ class EmbeddedKnowledge:
             platforms=list(self._platform_to_modules.keys()),
             modules_per_platform=modules_per_platform,
             modules_per_executor=modules_per_executor,
-            memory_size_mb=memory_mb
+            memory_size_mb=memory_mb,
+            total_nuclei_templates=len(self._nuclei_templates),
+            nuclei_templates_per_severity=nuclei_per_severity,
+            nuclei_templates_per_protocol=nuclei_per_protocol
         )
     
     # ═══════════════════════════════════════════════════════════
@@ -687,7 +857,14 @@ class EmbeddedKnowledge:
             'modules_per_platform': self._stats.modules_per_platform,
             'modules_per_executor': self._stats.modules_per_executor,
             'memory_size_mb': self._stats.memory_size_mb,
-            'loaded': len(self._rx_modules) > 0
+            'loaded': len(self._rx_modules) > 0,
+            # Nuclei Templates stats
+            'total_nuclei_templates': self._stats.total_nuclei_templates,
+            'nuclei_by_severity': self._stats.nuclei_templates_per_severity,
+            'nuclei_by_protocol': self._stats.nuclei_templates_per_protocol,
+            # Aliases for backwards compatibility
+            'nuclei_templates_per_severity': self._stats.nuclei_templates_per_severity,
+            'nuclei_templates_per_protocol': self._stats.nuclei_templates_per_protocol
         }
     
     def list_techniques(
@@ -932,6 +1109,236 @@ class EmbeddedKnowledge:
         return modules
     
     # ═══════════════════════════════════════════════════════════
+    # Nuclei Templates Query Methods
+    # ═══════════════════════════════════════════════════════════
+    
+    def get_nuclei_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get Nuclei template by ID.
+        
+        Args:
+            template_id: Template ID (e.g., 'CVE-2021-44228')
+            
+        Returns:
+            Template data dict or None
+        """
+        template = self._nuclei_templates.get(template_id)
+        if not template:
+            return None
+        
+        return self._nuclei_template_to_dict(template)
+    
+    def _nuclei_template_to_dict(self, template: NucleiTemplate) -> Dict[str, Any]:
+        """Convert NucleiTemplate to dictionary."""
+        return {
+            'template_id': template.template_id,
+            'name': template.name,
+            'severity': template.severity,
+            'description': template.description,
+            'author': template.author,
+            'tags': template.tags,
+            'reference': template.reference,
+            'cve_id': template.cve_id,
+            'cwe_id': template.cwe_id,
+            'cvss_score': template.cvss_score,
+            'cvss_metrics': template.cvss_metrics,
+            'protocol': template.protocol,
+            'file_path': template.file_path
+        }
+    
+    def get_nuclei_template_by_cve(self, cve_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get Nuclei template by CVE ID.
+        
+        Args:
+            cve_id: CVE ID (e.g., 'CVE-2021-44228')
+            
+        Returns:
+            Template data dict or None
+        """
+        template_id = self._nuclei_by_cve.get(cve_id.upper())
+        if not template_id:
+            return None
+        return self.get_nuclei_template(template_id)
+    
+    def get_nuclei_templates_by_severity(
+        self,
+        severity: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get Nuclei templates by severity.
+        
+        Args:
+            severity: Severity level (critical, high, medium, low, info)
+            limit: Maximum results
+            
+        Returns:
+            List of template dicts
+        """
+        template_ids = self._nuclei_by_severity.get(severity.lower(), [])[:limit]
+        return [
+            self._nuclei_template_to_dict(self._nuclei_templates[tid])
+            for tid in template_ids
+            if tid in self._nuclei_templates
+        ]
+    
+    def get_nuclei_templates_by_tag(
+        self,
+        tag: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get Nuclei templates by tag.
+        
+        Args:
+            tag: Tag to filter by (e.g., 'cve', 'rce', 'sqli')
+            limit: Maximum results
+            
+        Returns:
+            List of template dicts
+        """
+        template_ids = self._nuclei_by_tag.get(tag.lower(), [])[:limit]
+        return [
+            self._nuclei_template_to_dict(self._nuclei_templates[tid])
+            for tid in template_ids
+            if tid in self._nuclei_templates
+        ]
+    
+    def search_nuclei_templates(
+        self,
+        query: str,
+        severity: Optional[str] = None,
+        protocol: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Search Nuclei templates by keyword.
+        
+        Args:
+            query: Search query string
+            severity: Optional severity filter
+            protocol: Optional protocol filter
+            limit: Maximum results
+            
+        Returns:
+            List of matching templates
+        """
+        query_lower = query.lower()
+        results = []
+        
+        for template in self._nuclei_templates.values():
+            # Filter by severity
+            if severity and template.severity.lower() != severity.lower():
+                continue
+            
+            # Filter by protocol
+            if protocol and protocol.lower() not in [p.lower() for p in template.protocol]:
+                continue
+            
+            score = 0
+            
+            # Check template ID
+            if query_lower in template.template_id.lower():
+                score += 10
+            
+            # Check name
+            if query_lower in template.name.lower():
+                score += 8
+            
+            # Check CVE IDs
+            for cve in template.cve_id:
+                if query_lower in cve.lower():
+                    score += 10
+                    break
+            
+            # Check tags
+            for tag in template.tags:
+                if query_lower in tag.lower():
+                    score += 5
+                    break
+            
+            # Check description
+            if template.description and query_lower in template.description.lower():
+                score += 3
+            
+            if score > 0:
+                results.append((score, template))
+        
+        # Sort by score descending
+        results.sort(key=lambda x: x[0], reverse=True)
+        
+        return [
+            self._nuclei_template_to_dict(t)
+            for _, t in results[:limit]
+        ]
+    
+    def list_nuclei_templates(
+        self,
+        severity: Optional[str] = None,
+        protocol: Optional[str] = None,
+        tag: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        List Nuclei templates with filtering and pagination.
+        
+        Args:
+            severity: Filter by severity
+            protocol: Filter by protocol
+            tag: Filter by tag
+            limit: Page size
+            offset: Page offset
+            
+        Returns:
+            Tuple of (templates list, total count)
+        """
+        templates = list(self._nuclei_templates.values())
+        
+        # Apply filters
+        if severity:
+            templates = [t for t in templates if t.severity.lower() == severity.lower()]
+        
+        if protocol:
+            templates = [
+                t for t in templates
+                if protocol.lower() in [p.lower() for p in t.protocol]
+            ]
+        
+        if tag:
+            templates = [
+                t for t in templates
+                if tag.lower() in [tg.lower() for tg in t.tags]
+            ]
+        
+        total = len(templates)
+        
+        # Paginate
+        templates = templates[offset:offset + limit]
+        
+        return (
+            [self._nuclei_template_to_dict(t) for t in templates],
+            total
+        )
+    
+    def get_nuclei_critical_templates(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get all critical severity Nuclei templates."""
+        return self.get_nuclei_templates_by_severity('critical', limit)
+    
+    def get_nuclei_rce_templates(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get RCE (Remote Code Execution) templates."""
+        return self.get_nuclei_templates_by_tag('rce', limit)
+    
+    def get_nuclei_sqli_templates(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get SQL Injection templates."""
+        return self.get_nuclei_templates_by_tag('sqli', limit)
+    
+    def get_nuclei_xss_templates(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get XSS templates."""
+        return self.get_nuclei_templates_by_tag('xss', limit)
+    
+    # ═══════════════════════════════════════════════════════════
     # Utility Methods
     # ═══════════════════════════════════════════════════════════
     
@@ -956,6 +1363,12 @@ class EmbeddedKnowledge:
         self._executor_to_modules.clear()
         self._elevation_required_modules.clear()
         self._quick_index.clear()
+        # Clear Nuclei data
+        self._nuclei_templates.clear()
+        self._nuclei_by_severity.clear()
+        self._nuclei_by_tag.clear()
+        self._nuclei_by_cve.clear()
+        self._nuclei_by_protocol.clear()
         self._stats = None
         
         # Reload

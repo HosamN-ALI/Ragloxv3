@@ -1,0 +1,343 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="4" failures="2" skipped="0" tests="6" time="194.453" timestamp="2026-01-03T15:32:59.420054+00:00" hostname="newins"><testcase classname="tests.api_suite.test_approvals.TestMissionApprovals" name="test_list_pending_approvals_success" time="30.089"><error message="failed on setup with &quot;httpx.ReadTimeout: timed out&quot;">/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:101: in map_httpcore_exceptions
+    yield
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+/usr/local/lib/python3.12/dist-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpcore/_exceptions.py:14: in map_exceptions
+    raise to_exc(exc) from exc
+E   httpcore.ReadTimeout: timed out
+
+The above exception was the direct cause of the following exception:
+/usr/local/lib/python3.12/dist-packages/pytest_asyncio/plugin.py:730: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/api_suite/conftest.py:147: in created_mission
+    response = client.post("/api/v1/missions", json=sample_mission_create)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1144: in post
+    return self.request(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:118: in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+E   httpx.ReadTimeout: timed out</error></testcase><testcase classname="tests.api_suite.test_approvals.TestMissionApprovals" name="test_list_pending_approvals_empty" time="30.035"><error message="failed on setup with &quot;httpx.ReadTimeout: timed out&quot;">/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:101: in map_httpcore_exceptions
+    yield
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+/usr/local/lib/python3.12/dist-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpcore/_exceptions.py:14: in map_exceptions
+    raise to_exc(exc) from exc
+E   httpcore.ReadTimeout: timed out
+
+The above exception was the direct cause of the following exception:
+/usr/local/lib/python3.12/dist-packages/pytest_asyncio/plugin.py:730: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/api_suite/conftest.py:147: in created_mission
+    response = client.post("/api/v1/missions", json=sample_mission_create)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1144: in post
+    return self.request(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:118: in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+E   httpx.ReadTimeout: timed out</error></testcase><testcase classname="tests.api_suite.test_approvals.TestMissionApprovals" name="test_list_pending_approvals_not_found" time="30.030"><failure message="httpx.ReadTimeout: timed out">/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:101: in map_httpcore_exceptions
+    yield
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+/usr/local/lib/python3.12/dist-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpcore/_exceptions.py:14: in map_exceptions
+    raise to_exc(exc) from exc
+E   httpcore.ReadTimeout: timed out
+
+The above exception was the direct cause of the following exception:
+tests/api_suite/test_approvals.py:42: in test_list_pending_approvals_not_found
+    response = client.get(f"/api/v1/missions/{mission_id}/approvals")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1053: in get
+    return self.request(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:118: in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+E   httpx.ReadTimeout: timed out</failure></testcase><testcase classname="tests.api_suite.test_approvals.TestMissionApprovals" name="test_approve_action_success" time="30.034"><error message="failed on setup with &quot;httpx.ReadTimeout: timed out&quot;">/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:101: in map_httpcore_exceptions
+    yield
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+/usr/local/lib/python3.12/dist-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpcore/_exceptions.py:14: in map_exceptions
+    raise to_exc(exc) from exc
+E   httpcore.ReadTimeout: timed out
+
+The above exception was the direct cause of the following exception:
+/usr/local/lib/python3.12/dist-packages/pytest_asyncio/plugin.py:730: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/api_suite/conftest.py:147: in created_mission
+    response = client.post("/api/v1/missions", json=sample_mission_create)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1144: in post
+    return self.request(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:118: in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+E   httpx.ReadTimeout: timed out</error></testcase><testcase classname="tests.api_suite.test_approvals.TestMissionApprovals" name="test_approve_action_not_found" time="30.031"><error message="failed on setup with &quot;httpx.ReadTimeout: timed out&quot;">/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:101: in map_httpcore_exceptions
+    yield
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+/usr/local/lib/python3.12/dist-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpcore/_exceptions.py:14: in map_exceptions
+    raise to_exc(exc) from exc
+E   httpcore.ReadTimeout: timed out
+
+The above exception was the direct cause of the following exception:
+/usr/local/lib/python3.12/dist-packages/pytest_asyncio/plugin.py:730: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/api_suite/conftest.py:147: in created_mission
+    response = client.post("/api/v1/missions", json=sample_mission_create)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1144: in post
+    return self.request(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:118: in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+E   httpx.ReadTimeout: timed out</error></testcase><testcase classname="tests.api_suite.test_approvals.TestMissionApprovals" name="test_approve_action_mission_not_found" time="30.002"><failure message="httpx.ReadTimeout: timed out">/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:101: in map_httpcore_exceptions
+    yield
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+/usr/local/lib/python3.12/dist-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpcore/_exceptions.py:14: in map_exceptions
+    raise to_exc(exc) from exc
+E   httpcore.ReadTimeout: timed out
+
+The above exception was the direct cause of the following exception:
+tests/api_suite/test_approvals.py:72: in test_approve_action_mission_not_found
+    response = client.post(f"/api/v1/missions/{mission_id}/approve/{action_id}", json=sample_approval_request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1144: in post
+    return self.request(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+/usr/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+/usr/local/lib/python3.12/dist-packages/httpx/_transports/default.py:118: in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+E   httpx.ReadTimeout: timed out</failure></testcase></testsuite></testsuites>

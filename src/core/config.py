@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, description="API port")
     api_reload: bool = Field(default=False, description="Auto-reload on changes")
     cors_origins: str = Field(
-        default="http://localhost:3000",
+        default="*",
         description="Comma-separated list of allowed CORS origins"
     )
     
@@ -143,8 +143,8 @@ class Settings(BaseSettings):
     # Knowledge Base
     # ═══════════════════════════════════════════════════════════
     knowledge_data_path: str = Field(
-        default="/opt/raglox/data",
-        description="Path to knowledge base data"
+        default="data",
+        description="Path to knowledge base data (relative to webapp or absolute)"
     )
     
     # ═══════════════════════════════════════════════════════════

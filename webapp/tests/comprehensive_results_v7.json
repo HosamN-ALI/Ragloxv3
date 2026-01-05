@@ -1,0 +1,166 @@
+{
+  "run_id": "4e3878a9-d6d8-472b-8b54-638810c886dd",
+  "timestamp": "2026-01-05T05:29:41.030528",
+  "summary": {
+    "total": 20,
+    "passed": 18,
+    "failed": 0,
+    "partial": 2,
+    "errors": 0,
+    "success_rate": "90.0%"
+  },
+  "llm_usage": {
+    "total_llm_calls": 0,
+    "total_tokens": 0,
+    "llm_decision_rate": "11.9%",
+    "decision_accuracy": "76.2%",
+    "tokens_per_decision": "0.0",
+    "avg_latency_ms": "0.0"
+  },
+  "recommendations": [
+    "\u26a0\ufe0f LLM calls = 0: Ensure LLM integration is properly configured. Check AnalysisSpecialist._needs_llm_analysis() conditions.",
+    "\ud83d\udcca LLM Decision Rate: 11.9% - Consider relaxing _needs_llm_analysis() conditions to utilize LLM more often for better decisions."
+  ],
+  "results": [
+    {
+      "name": "Basic Network Scan",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 3.283977508544922,
+      "actual": "Discovered 4 hosts"
+    },
+    {
+      "name": "Basic Port Scan",
+      "difficulty": "basic",
+      "outcome": "partial",
+      "duration_ms": 4307.207107543945,
+      "actual": "Found 4 ports (expected \u22655)"
+    },
+    {
+      "name": "Basic Service Enumeration",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 388.1411552429199,
+      "actual": "Enumerated 4 services"
+    },
+    {
+      "name": "Basic CVE Exploitation",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 501.3883113861084,
+      "actual": "Exploit successful, session established"
+    },
+    {
+      "name": "LLM Decision - Network Errors",
+      "difficulty": "basic",
+      "outcome": "passed",
+      "duration_ms": 0.48613548278808594,
+      "actual": "Network error decisions: 100% correct"
+    },
+    {
+      "name": "Credential Harvesting",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 0.7143020629882812,
+      "actual": "Harvested 5 credentials"
+    },
+    {
+      "name": "Lateral Movement",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 0.274658203125,
+      "actual": "Lateral movement to 2 target(s)"
+    },
+    {
+      "name": "Privilege Escalation",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 0.2491474151611328,
+      "actual": "Escalated to root"
+    },
+    {
+      "name": "Multi-Step Attack Chain",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 1841.5615558624268,
+      "actual": "Attack chain: 7/7 phases (['network_scan', 'port_scan', 'service_enum', 'exploit', 'privesc', 'cred_harvest', 'lateral'])"
+    },
+    {
+      "name": "LLM Decision - Defense Detection",
+      "difficulty": "intermediate",
+      "outcome": "passed",
+      "duration_ms": 51980.233907699585,
+      "actual": "Defense decisions: 100% correct, 67% LLM"
+    },
+    {
+      "name": "AV Evasion",
+      "difficulty": "advanced",
+      "outcome": "passed",
+      "duration_ms": 13403.484344482422,
+      "actual": "Correct: modify_approach with evasion (source=llm)"
+    },
+    {
+      "name": "EDR Evasion",
+      "difficulty": "advanced",
+      "outcome": "passed",
+      "duration_ms": 13502.718210220337,
+      "actual": "Correct: modify_approach with LOLBAS"
+    },
+    {
+      "name": "Complex Multi-Factor Failure",
+      "difficulty": "advanced",
+      "outcome": "passed",
+      "duration_ms": 1.683950424194336,
+      "actual": "Complex analysis: modify_approach (addressed 2 factors)"
+    },
+    {
+      "name": "Adaptive Retry Strategy",
+      "difficulty": "advanced",
+      "outcome": "passed",
+      "duration_ms": 0.48851966857910156,
+      "actual": "Adapted after 3 attempts: modify_approach"
+    },
+    {
+      "name": "Defense Correlation Analysis",
+      "difficulty": "advanced",
+      "outcome": "passed",
+      "duration_ms": 20518.229484558105,
+      "actual": "Defense correlation: modify_approach with 3 evasion techniques"
+    },
+    {
+      "name": "APT Attack Simulation",
+      "difficulty": "expert",
+      "outcome": "passed",
+      "duration_ms": 5655.230522155762,
+      "actual": "APT simulation: 7/7 phases"
+    },
+    {
+      "name": "Stealth Operation",
+      "difficulty": "expert",
+      "outcome": "partial",
+      "duration_ms": 2476.4926433563232,
+      "actual": "Stealth: 40%, 3 objectives"
+    },
+    {
+      "name": "Persistence Establishment",
+      "difficulty": "expert",
+      "outcome": "passed",
+      "duration_ms": 401.47876739501953,
+      "actual": "Persistence: 4/4 methods established"
+    },
+    {
+      "name": "Data Exfiltration",
+      "difficulty": "expert",
+      "outcome": "passed",
+      "duration_ms": 502.84481048583984,
+      "actual": "Exfiltration: 5/5 phases, 3 sources"
+    },
+    {
+      "name": "Multi-Target Attack Coordination",
+      "difficulty": "expert",
+      "outcome": "passed",
+      "duration_ms": 503.52001190185547,
+      "actual": "Multi-target: 4/4 phases (['recon', 'initial_access', 'cred_harvest', 'lateral'])"
+    }
+  ]
+}

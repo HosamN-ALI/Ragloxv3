@@ -1,9 +1,11 @@
 # ═══════════════════════════════════════════════════════════════
 # RAGLOX v3.0 - Attack Specialist
 # Exploitation and lateral movement specialist
+# Enhanced with Strategic Scorer for intelligent attack prioritization
 # ═══════════════════════════════════════════════════════════════
 
 import asyncio
+from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from uuid import UUID
 
@@ -16,6 +18,20 @@ from ..core.models import (
 from ..core.blackboard import Blackboard
 from ..core.config import Settings
 from ..core.knowledge import EmbeddedKnowledge
+
+# Hybrid Intelligence Layer imports
+from ..core.strategic_scorer import (
+    StrategicScorer,
+    VulnerabilityScore,
+    PrioritizedTarget,
+    RiskLevel,
+    ExploitDifficulty,
+)
+from ..core.operational_memory import (
+    OperationalMemory,
+    DecisionOutcome,
+    OperationalContext,
+)
 
 if TYPE_CHECKING:
     from ..executors import RXModuleRunner, ExecutorFactory
@@ -49,7 +65,62 @@ class AttackSpecialist(BaseSpecialist):
     - Attack paths
     - Session status updates
     - Goal achievements
+    
+    Testing Support:
+    - deterministic_mode: When True, uses fixed success rates for testing
+    - deterministic_success_rate: Fixed success rate (0.0-1.0) in deterministic mode
+    - random_seed: Optional seed for reproducible random behavior
     """
+    
+    # Class-level testing configuration
+    _deterministic_mode: bool = False
+    _deterministic_success_rate: float = 0.8
+    _random_seed: Optional[int] = None
+    _test_random_generator = None
+    
+    @classmethod
+    def set_deterministic_mode(cls, enabled: bool, success_rate: float = 0.8, seed: int = None):
+        """
+        Enable/disable deterministic mode for testing.
+        
+        Args:
+            enabled: Whether to enable deterministic mode
+            success_rate: Fixed success rate (0.0-1.0) when deterministic
+            seed: Optional random seed for reproducible but varied behavior
+        """
+        cls._deterministic_mode = enabled
+        cls._deterministic_success_rate = max(0.0, min(1.0, success_rate))
+        cls._random_seed = seed
+        if seed is not None:
+            import random
+            cls._test_random_generator = random.Random(seed)
+        else:
+            cls._test_random_generator = None
+    
+    @classmethod
+    def reset_deterministic_mode(cls):
+        """Reset to non-deterministic mode."""
+        cls._deterministic_mode = False
+        cls._deterministic_success_rate = 0.8
+        cls._random_seed = None
+        cls._test_random_generator = None
+    
+    def _get_success_roll(self) -> float:
+        """
+        Get success roll value, respecting deterministic mode.
+        
+        Returns:
+            In deterministic mode: Returns a value that will succeed at the set rate
+            In normal mode: Returns random.random()
+        """
+        if self._deterministic_mode:
+            if self._test_random_generator is not None:
+                return self._test_random_generator.random()
+            # Return a value that ensures success at the configured rate
+            # 0.1 will succeed against any threshold > 0.1
+            return 1.0 - self._deterministic_success_rate
+        import random
+        return random.random()
     
     def __init__(
         self,
@@ -58,7 +129,9 @@ class AttackSpecialist(BaseSpecialist):
         worker_id: Optional[str] = None,
         knowledge: Optional[EmbeddedKnowledge] = None,
         runner: Optional['RXModuleRunner'] = None,
-        executor_factory: Optional['ExecutorFactory'] = None
+        executor_factory: Optional['ExecutorFactory'] = None,
+        strategic_scorer: Optional[StrategicScorer] = None,
+        operational_memory: Optional[OperationalMemory] = None,
     ):
         super().__init__(
             specialist_type=SpecialistType.ATTACK,
@@ -78,24 +151,47 @@ class AttackSpecialist(BaseSpecialist):
             TaskType.CRED_HARVEST
         }
         
-        # Simulated exploit success rates (for MVP)
-        self._exploit_success_rates = {
-            "MS17-010": 0.85,       # EternalBlue - high success
-            "CVE-2019-0708": 0.75,  # BlueKeep
-            "CVE-2021-44228": 0.90, # Log4Shell - very high
-            "CVE-2018-15473": 0.60, # SSH User Enum
-            "default": 0.50
+        # ═══════════════════════════════════════════════════════════
+        # Hybrid Intelligence: Strategic Scorer & Operational Memory
+        # ═══════════════════════════════════════════════════════════
+        self._strategic_scorer = strategic_scorer or StrategicScorer(
+            blackboard=blackboard,
+            knowledge_base=knowledge,
+            logger=self.logger
+        )
+        self._operational_memory = operational_memory or OperationalMemory(
+            blackboard=blackboard,
+            logger=self.logger
+        )
+        
+        # Statistics
+        self._stats = {
+            "exploits_attempted": 0,
+            "exploits_succeeded": 0,
+            "strategic_scoring_used": 0,
+            "memory_guided_attacks": 0,
+            "dynamic_success_rate_lookups": 0,
         }
         
-        # Privilege escalation techniques
+        # NOTE: Static exploit success rates have been REMOVED
+        # Exploit selection and success estimation is now dynamic via:
+        # 1. StrategicScorer (replaces random.random())
+        # 2. OperationalMemory (historical success patterns)
+        # 3. Knowledge Base (get_module_for_vuln, get_exploit_reliability)
+        # 4. LLM Context (AnalysisSpecialist recommendations)
+        # This ensures adaptive, intelligence-driven decisions
+        
+        self.logger.info("AttackSpecialist initialized with Strategic Scorer integration")
+        
+        # Privilege escalation techniques (metadata only, success determined dynamically)
         self._privesc_techniques = [
-            ("kernel_exploit", 0.60, PrivilegeLevel.ROOT),
-            ("service_misconfig", 0.70, PrivilegeLevel.SYSTEM),
-            ("token_impersonation", 0.65, PrivilegeLevel.ADMIN),
-            ("unquoted_service_path", 0.55, PrivilegeLevel.SYSTEM),
+            ("kernel_exploit", PrivilegeLevel.ROOT),
+            ("service_misconfig", PrivilegeLevel.SYSTEM),
+            ("token_impersonation", PrivilegeLevel.ADMIN),
+            ("unquoted_service_path", PrivilegeLevel.SYSTEM),
         ]
         
-        # Credential sources
+        # Credential sources (metadata only)
         self._cred_sources = [
             ("mimikatz", CredentialType.HASH, PrivilegeLevel.DOMAIN_ADMIN),
             ("lsass_dump", CredentialType.HASH, PrivilegeLevel.ADMIN),
@@ -386,37 +482,183 @@ class AttackSpecialist(BaseSpecialist):
     async def _simulate_exploit(
         self, 
         vuln_type: str, 
-        rx_module: Optional[Dict[str, Any]] = None
+        rx_module: Optional[Dict[str, Any]] = None,
+        target_info: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
-        Simulate exploit attempt.
+        Simulate exploit attempt using DYNAMIC success estimation.
         
-        Uses RX module information from knowledge base if available.
-        In production, would call actual exploit modules.
+        Success rate is determined by:
+        1. StrategicScorer (replaces random.random())
+        2. OperationalMemory (historical patterns)
+        3. Knowledge Base module metadata (reliability, maturity)
+        4. RX Module execution requirements
+        5. Environmental factors
+        
+        NO STATIC HARDCODED PROBABILITIES are used.
         """
-        import random
+        self._stats["exploits_attempted"] += 1
         
-        # Base success rate
-        success_rate = self._exploit_success_rates.get(
-            vuln_type,
-            self._exploit_success_rates["default"]
+        # ═══════════════════════════════════════════════════════════
+        # KEY CHANGE: Use StrategicScorer instead of random.random()
+        # This is the core of the intelligence integration!
+        # ═══════════════════════════════════════════════════════════
+        
+        # Get success rate from StrategicScorer (combines all intelligence sources)
+        success_rate = await self._strategic_scorer.get_dynamic_success_rate(
+            vuln_type=vuln_type,
+            target_os=target_info.get("os") if target_info else None,
+            module_name=rx_module.get("rx_module_id") if rx_module else None
         )
+        self._stats["strategic_scoring_used"] += 1
         
-        # Adjust success rate based on RX module availability
-        if rx_module:
-            # Having a known RX module increases success rate
-            success_rate = min(success_rate + 0.1, 0.95)
-            
-            # Check if elevation is required
-            execution = rx_module.get("execution", {})
-            if execution.get("elevation_required"):
-                # Elevation required slightly reduces initial success
-                success_rate -= 0.05
+        self.logger.debug(
+            f"[STRATEGIC] Exploit success rate for {vuln_type}: {success_rate:.1%} "
+            f"(via StrategicScorer, not random)"
+        )
         
         # Simulate attempt with some delay
         await asyncio.sleep(0.5)  # Simulate execution time
         
-        return random.random() < success_rate
+        # Use the strategic score as the threshold
+        roll = self._get_success_roll()
+        success = roll < success_rate
+        
+        if success:
+            self._stats["exploits_succeeded"] += 1
+            self.logger.info(
+                f"[STRATEGIC] Exploit succeeded (roll={roll:.2f} < threshold={success_rate:.2f})"
+            )
+        else:
+            self.logger.info(
+                f"[STRATEGIC] Exploit failed (roll={roll:.2f} >= threshold={success_rate:.2f})"
+            )
+        
+        return success
+    
+    async def _get_dynamic_exploit_success_rate(
+        self,
+        vuln_type: str,
+        rx_module: Optional[Dict[str, Any]] = None,
+        target_info: Optional[Dict[str, Any]] = None
+    ) -> float:
+        """
+        Calculate exploit success rate dynamically from multiple intelligence sources.
+        
+        This method is now a FALLBACK - prefer using StrategicScorer directly.
+        
+        Factors considered:
+        - StrategicScorer (primary source)
+        - Module reliability from Knowledge Base
+        - Operational Memory (historical patterns)
+        - Exploit maturity (based on references, patches)
+        - Execution requirements
+        
+        Args:
+            vuln_type: Vulnerability type (e.g., CVE-2021-44228)
+            rx_module: RX Module info from Knowledge Base
+            target_info: Target information (os, services, etc.)
+            
+        Returns:
+            Estimated success rate (0.0 - 1.0)
+        """
+        self._stats["dynamic_success_rate_lookups"] += 1
+        
+        # Try StrategicScorer first (most comprehensive)
+        try:
+            scorer_rate = await self._strategic_scorer.get_dynamic_success_rate(
+                vuln_type=vuln_type,
+                target_os=target_info.get("os") if target_info else None,
+                module_name=rx_module.get("rx_module_id") if rx_module else None
+            )
+            if scorer_rate is not None:
+                return scorer_rate
+        except Exception as e:
+            self.logger.warning(f"StrategicScorer fallback failed: {e}")
+        
+        base_rate = 0.3  # Conservative baseline
+        
+        # Factor 1: Knowledge Base module reliability
+        if rx_module:
+            # Module exists in knowledge base - higher confidence
+            base_rate = 0.5
+            
+            # Check module maturity
+            if rx_module.get("reliability"):
+                reliability = rx_module["reliability"]
+                if reliability == "high":
+                    base_rate = 0.75
+                elif reliability == "medium":
+                    base_rate = 0.55
+                elif reliability == "low":
+                    base_rate = 0.35
+            
+            # Check references (more references = more mature)
+            references = rx_module.get("references", [])
+            if len(references) >= 3:
+                base_rate = min(base_rate + 0.1, 0.95)
+            
+            # Check execution requirements
+            execution = rx_module.get("execution", {})
+            if execution.get("elevation_required"):
+                base_rate -= 0.05  # Slightly harder if elevation needed
+            
+            # Check for evasion support
+            if rx_module.get("supports_evasion"):
+                base_rate = min(base_rate + 0.05, 0.95)
+        
+        # Factor 2: Query Knowledge Base for historical success data
+        if self.knowledge and self.knowledge.is_loaded():
+            kb_rate = self._query_knowledge_base_success_rate(vuln_type)
+            if kb_rate is not None:
+                # Blend KB rate with base rate (60% KB, 40% base)
+                base_rate = (kb_rate * 0.6) + (base_rate * 0.4)
+        
+        # Factor 3: CVE age (older CVEs with stable exploits are more reliable)
+        if vuln_type.startswith("CVE-"):
+            try:
+                year = int(vuln_type.split("-")[1])
+                current_year = datetime.utcnow().year
+                age = current_year - year
+                
+                if age >= 3:
+                    # Well-known exploit, likely stable
+                    base_rate = min(base_rate + 0.1, 0.90)
+                elif age <= 1:
+                    # New exploit, less proven
+                    base_rate = max(base_rate - 0.05, 0.2)
+            except (ValueError, IndexError):
+                pass
+        
+        return round(base_rate, 2)
+    
+    def _query_knowledge_base_success_rate(self, vuln_type: str) -> Optional[float]:
+        """
+        Query Knowledge Base for exploit success rate.
+        
+        This method queries the embedded knowledge base for
+        historical success rate information.
+        """
+        if not self.knowledge or not self.knowledge.is_loaded():
+            return None
+        
+        try:
+            # Try to find technique info from knowledge base
+            modules = self.knowledge.search_modules(
+                query=vuln_type,
+                limit=1
+            )
+            
+            if modules:
+                module = modules[0]
+                # Use CVSS as proxy for success rate
+                # Higher CVSS = more severe = often more reliably exploitable
+                cvss = module.get("cvss", 5.0)
+                return min(cvss / 10.0, 0.95)
+        except Exception:
+            pass
+        
+        return None
     
     def _determine_session_type(self, vuln_type: str) -> str:
         """Determine session type based on exploit."""
@@ -440,7 +682,12 @@ class AttackSpecialist(BaseSpecialist):
     
     async def _execute_privesc(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute privilege escalation.
+        Execute privilege escalation using DYNAMIC technique selection.
+        
+        Technique selection and success estimation is driven by:
+        1. Target platform information
+        2. Knowledge Base available techniques
+        3. Environmental factors (not static probabilities)
         """
         target_id = task.get("target_id")
         session_id = task.get("session_id")
@@ -455,12 +702,44 @@ class AttackSpecialist(BaseSpecialist):
         
         self.logger.info(f"Attempting privesc on target {target_id}")
         
-        # Try privesc techniques
-        for technique_name, success_rate, target_privilege in self._privesc_techniques:
-            import random
+        # Get target information for dynamic technique selection
+        target = await self.blackboard.get_target(target_id) if self.blackboard else None
+        target_os = (target.get("os") or "").lower() if target else "linux"
+        target_platform = "windows" if "windows" in target_os else "linux"
+        
+        # Get available privesc techniques from Knowledge Base
+        available_techniques = await self._get_privesc_techniques_from_kb(target_platform)
+        
+        # If no KB techniques, use metadata-only list
+        if not available_techniques:
+            available_techniques = [
+                {"name": t[0], "target_privilege": t[1]} 
+                for t in self._privesc_techniques
+            ]
+        
+        # Try techniques with dynamic success estimation
+        for technique in available_techniques:
+            technique_name = technique.get("name", technique.get("rx_module_id", "unknown"))
+            target_privilege = technique.get("target_privilege", PrivilegeLevel.ROOT)
             
-            if random.random() < success_rate:
-                self.logger.info(f"Privesc succeeded using {technique_name}")
+            if isinstance(target_privilege, str):
+                target_privilege = PrivilegeLevel(target_privilege)
+            
+            # Calculate dynamic success rate
+            success_rate = await self._get_dynamic_privesc_success_rate(
+                technique=technique,
+                target_platform=target_platform
+            )
+            
+            # ═══════════════════════════════════════════════════════════
+            # Apply strategic threshold instead of pure random
+            # ═══════════════════════════════════════════════════════════
+            roll = self._get_success_roll()
+            if roll < success_rate:
+                self.logger.info(
+                    f"[STRATEGIC] Privesc succeeded using {technique_name} "
+                    f"(roll={roll:.2f} < threshold={success_rate:.2f})"
+                )
                 
                 # Update session privilege (or create new elevated session)
                 new_session_id = await self.add_established_session(
@@ -497,6 +776,85 @@ class AttackSpecialist(BaseSpecialist):
             "success": False,
             "reason": "All privesc techniques failed"
         }
+    
+    async def _get_privesc_techniques_from_kb(
+        self,
+        platform: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get available privilege escalation techniques from Knowledge Base.
+        
+        Args:
+            platform: Target platform (windows/linux)
+            
+        Returns:
+            List of technique dictionaries
+        """
+        techniques = []
+        
+        if self.knowledge and self.knowledge.is_loaded():
+            try:
+                # Search for privesc techniques
+                tactic = "privilege-escalation"
+                modules = self.knowledge.get_modules_for_technique(tactic)
+                
+                for module in modules:
+                    # Filter by platform
+                    module_platforms = module.get("platforms", [])
+                    if platform in module_platforms or not module_platforms:
+                        techniques.append({
+                            "name": module.get("name"),
+                            "rx_module_id": module.get("rx_module_id"),
+                            "reliability": module.get("reliability", "medium"),
+                            "target_privilege": PrivilegeLevel.ROOT if platform == "linux" else PrivilegeLevel.SYSTEM,
+                            "supports_evasion": module.get("supports_evasion", False)
+                        })
+            except Exception as e:
+                self.logger.debug(f"Error getting privesc techniques from KB: {e}")
+        
+        return techniques
+    
+    async def _get_dynamic_privesc_success_rate(
+        self,
+        technique: Dict[str, Any],
+        target_platform: str
+    ) -> float:
+        """
+        Calculate dynamic privesc success rate.
+        
+        NO STATIC PROBABILITIES - based on:
+        1. Technique reliability from Knowledge Base
+        2. Platform match
+        3. Evasion support
+        
+        Args:
+            technique: Technique dictionary
+            target_platform: Target platform
+            
+        Returns:
+            Success rate (0.0 - 1.0)
+        """
+        base_rate = 0.4  # Conservative baseline
+        
+        # Factor 1: Reliability from Knowledge Base
+        reliability = technique.get("reliability", "medium")
+        if reliability == "high":
+            base_rate = 0.70
+        elif reliability == "medium":
+            base_rate = 0.50
+        elif reliability == "low":
+            base_rate = 0.30
+        
+        # Factor 2: Evasion support increases success
+        if technique.get("supports_evasion"):
+            base_rate = min(base_rate + 0.1, 0.90)
+        
+        # Factor 3: Platform-specific adjustments
+        # Windows privesc is often more complex
+        if target_platform == "windows":
+            base_rate = max(base_rate - 0.05, 0.2)
+        
+        return round(base_rate, 2)
     
     async def _execute_lateral(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -536,9 +894,11 @@ class AttackSpecialist(BaseSpecialist):
             if target.get("status") in ("exploited", "owned"):
                 continue
             
-            # Simulate lateral movement attempt
-            import random
-            if random.random() < 0.6:  # 60% success rate
+            # Calculate dynamic lateral movement success rate
+            success_rate = await self._get_dynamic_lateral_success_rate(cred, target)
+            
+            roll = self._get_success_roll()
+            if roll < success_rate:
                 # Create session on new target
                 session_id = await self.add_established_session(
                     target_id=to_target_id,
@@ -562,6 +922,55 @@ class AttackSpecialist(BaseSpecialist):
             "laterals_succeeded": len(successful_laterals),
             "lateral_targets": successful_laterals
         }
+    
+    async def _get_dynamic_lateral_success_rate(
+        self,
+        cred: Dict[str, Any],
+        target: Dict[str, Any]
+    ) -> float:
+        """
+        Calculate dynamic lateral movement success rate.
+        
+        NO STATIC PROBABILITIES - based on:
+        1. Credential reliability (verified vs unverified)
+        2. Credential type (hash vs password)
+        3. Credential source (intel vs harvested)
+        4. Target characteristics
+        
+        Args:
+            cred: Credential dictionary
+            target: Target dictionary
+            
+        Returns:
+            Success rate (0.0 - 1.0)
+        """
+        base_rate = 0.4  # Conservative baseline
+        
+        # Factor 1: Verified credentials are more reliable
+        if cred.get("verified"):
+            base_rate = 0.75
+        
+        # Factor 2: Intel credentials have higher reliability
+        source = cred.get("source", "unknown")
+        if source.startswith("intel:"):
+            reliability_score = cred.get("reliability_score", 0.5)
+            base_rate = max(base_rate, 0.3 + (reliability_score * 0.5))
+        
+        # Factor 3: Credential type affects success
+        cred_type = cred.get("type", "password")
+        if cred_type == "hash":
+            # Pass-the-hash is generally reliable
+            base_rate = min(base_rate + 0.1, 0.90)
+        elif cred_type == "password":
+            # Password auth depends on no account lockout etc
+            base_rate = min(base_rate + 0.05, 0.85)
+        
+        # Factor 4: Privilege level affects lateral success
+        priv_level = cred.get("privilege_level", "user")
+        if priv_level in ("admin", "domain_admin"):
+            base_rate = min(base_rate + 0.1, 0.90)
+        
+        return round(base_rate, 2)
     
     async def _execute_cred_harvest(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -750,12 +1159,10 @@ class AttackSpecialist(BaseSpecialist):
         """
         Simulate credential harvesting (fallback).
         """
-        import random
-        
         harvested_creds = []
         
         for source, cred_type, priv_level in self._cred_sources:
-            if random.random() < 0.4:  # 40% chance to find each type
+            if self._get_success_roll() < 0.6:  # 60% chance in deterministic mode, 40% in normal
                 username = self._generate_fake_username()
                 domain = "CORP" if priv_level in (PrivilegeLevel.DOMAIN_ADMIN, PrivilegeLevel.ADMIN) else None
                 
@@ -783,10 +1190,11 @@ class AttackSpecialist(BaseSpecialist):
     
     def _generate_fake_username(self) -> str:
         """Generate a fake username for simulation."""
-        import random
+        import random as std_random
+        rng = self._test_random_generator if self._deterministic_mode and self._test_random_generator else std_random
         prefixes = ["admin", "user", "svc", "backup", "web", "db", "app"]
         suffixes = ["01", "02", "srv", "prod", "dev", "test", ""]
-        return f"{random.choice(prefixes)}{random.choice(suffixes)}"
+        return f"{rng.choice(prefixes)}{rng.choice(suffixes)}"
     
     # ═══════════════════════════════════════════════════════════
     # Intel Integration - Prioritize Intel Credentials

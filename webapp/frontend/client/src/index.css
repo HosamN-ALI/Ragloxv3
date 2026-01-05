@@ -1,0 +1,931 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================
+   MANUS EXACT DESIGN SYSTEM
+   Based on detailed visual analysis document
+   ============================================ */
+
+@theme inline {
+  /* Border Radius - Manus uses larger, softer corners */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 24px;
+  
+  /* Color mappings */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  
+  /* RAGLOX Custom Colors */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
+  --color-terminal: var(--terminal);
+  --color-terminal-foreground: var(--terminal-foreground);
+  --color-terminal-prompt: var(--terminal-prompt);
+}
+
+:root {
+  --radius: 12px;
+  
+  /* ========================================
+     MANUS WARM DARK PALETTE
+     Key: Warm grays (NOT blue-tinted)
+     ======================================== */
+  
+  /* Primary Backgrounds - Warm Dark Gray */
+  --background: #1a1a1a;           /* Main content - warm dark gray */
+  --foreground: #e8e8e8;           /* Primary text - warm white (NOT pure white) */
+  
+  /* Cards/Surfaces - Charcoal */
+  --card: #2a2a2a;                 /* Cards, input boxes - charcoal */
+  --card-foreground: #e8e8e8;
+  
+  /* Popover - Same as card */
+  --popover: #2a2a2a;
+  --popover-foreground: #e8e8e8;
+  
+  /* Primary - Soft Sky Blue (less saturated than typical blue) */
+  --primary: #4a9eff;
+  --primary-foreground: #000000;
+  
+  /* Secondary - Elevated surface */
+  --secondary: #1f1f1f;
+  --secondary-foreground: #888888;
+  
+  /* Muted - Subtle backgrounds */
+  --muted: #2a2a2a;
+  --muted-foreground: #888888;     /* Neutral gray (NOT blue-tinted) */
+  
+  /* Accent - Hover states */
+  --accent: #242424;
+  --accent-foreground: #e8e8e8;
+  
+  /* Destructive - Danger Red */
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  
+  /* Borders - Very subtle (nearly invisible) */
+  --border: rgba(255, 255, 255, 0.06);
+  --input: #2a2a2a;
+  --ring: #4a9eff;
+  
+  /* ========== RAGLOX SECURITY COLORS ========== */
+  
+  /* Success - Emerald Green */
+  --success: #4ade80;
+  --success-foreground: #000000;
+  
+  /* Warning - Golden Orange (Max badge color) */
+  --warning: #f59e0b;
+  --warning-foreground: #000000;
+  
+  /* Critical - Same as destructive */
+  --critical: #ef4444;
+  --critical-foreground: #ffffff;
+  
+  /* ========== TERMINAL COLORS ========== */
+  --terminal: #0d0d0d;             /* Deepest black */
+  --terminal-foreground: #e8e8e8;
+  --terminal-prompt: #4ade80;
+  
+  /* ========== CHART COLORS ========== */
+  --chart-1: #4a9eff;
+  --chart-2: #4ade80;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #a78bfa;
+  
+  /* ========== SIDEBAR COLORS ========== */
+  --sidebar: #141414;              /* Soft black */
+  --sidebar-foreground: #888888;
+  --sidebar-primary: #4a9eff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1f1f1f;
+  --sidebar-accent-foreground: #e8e8e8;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: #4a9eff;
+  
+  /* ========== SHADOWS - Soft & Spread ========== */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 4px 24px rgba(0, 0, 0, 0.22);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.28);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.1), 0 4px 24px rgba(0, 0, 0, 0.15);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.2);
+  --glow-blue: 0 0 20px rgba(74, 158, 255, 0.15);
+  --glow-green: 0 0 20px rgba(74, 222, 128, 0.15);
+  
+  /* ========== TRANSITIONS ========== */
+  --transition-fast: 150ms ease-out;
+  --transition-normal: 200ms ease-out;
+  --transition-slow: 300ms ease-out;
+  
+  /* ========== SPACING ========== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --card-padding: 16px;
+  --card-gap: 12px;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Clickable elements */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  a[href],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+  
+  /* Typography */
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  
+  /* Code */
+  code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+  }
+}
+
+/* ============================================
+   COMPONENT STYLES
+   ============================================ */
+
+@layer components {
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .flex {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem;
+      padding-right: 2rem;
+      max-width: 1280px;
+    }
+  }
+  
+  /* ========================================
+     MANUS-STYLE AGENT HEADER
+     ======================================== */
+  .agent-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .agent-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--foreground);
+  }
+  
+  /* Max Badge - Golden gradient */
+  .agent-badge {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #000;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    text-transform: capitalize;
+  }
+  
+  .agent-timestamp {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    margin-left: auto;
+  }
+  
+  /* ========================================
+     MANUS-STYLE EVENT CARD
+     No hard borders - use shadows for depth
+     ======================================== */
+  .event-card {
+    border-radius: 12px;
+    transition: all 200ms ease-out;
+    box-shadow: var(--shadow-card);
+    background: #1f1f1f;
+    /* NO border - rely on shadow and color contrast */
+  }
+  
+  .event-card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+  
+  .event-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 12px 0;
+  }
+  
+  .event-card-header .checkmark {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(74, 222, 128, 0.15);
+    color: #4ade80;
+  }
+  
+  .event-card-header .checkmark.pending {
+    background: #2a2a2a;
+    color: #888888;
+  }
+  
+  .event-card-header .checkmark.running {
+    background: rgba(74, 158, 255, 0.15);
+    color: #4a9eff;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  
+  .event-card-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--foreground);
+    flex: 1;
+  }
+  
+  .event-card-chevron {
+    width: 16px;
+    height: 16px;
+    color: var(--muted-foreground);
+    transition: transform 200ms ease-out;
+  }
+  
+  .event-card-chevron.expanded {
+    transform: rotate(180deg);
+  }
+  
+  /* ========================================
+     KNOWLEDGE BADGE - Ghost Button Style
+     ======================================== */
+  .knowledge-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 24px;
+    font-size: 13px;
+    background: transparent;
+    color: #888888;
+    cursor: pointer;
+    transition: background-color 200ms ease-out;
+  }
+  
+  .knowledge-badge:hover {
+    background: #2a2a2a;
+  }
+  
+  .knowledge-badge .icon {
+    width: 16px;
+    height: 16px;
+    color: #4a9eff;
+  }
+  
+  .knowledge-badge .chevron {
+    width: 12px;
+    height: 12px;
+    margin-left: 2px;
+    transition: transform 200ms ease-out;
+  }
+  
+  .knowledge-badge .chevron.expanded {
+    transform: rotate(180deg);
+  }
+  
+  /* ========================================
+     COMMAND PILL
+     ======================================== */
+  .command-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    background: #1f1f1f;
+    color: #888888;
+    cursor: pointer;
+    transition: background-color 200ms ease-out;
+  }
+  
+  .command-pill:hover {
+    background: #2a2a2a;
+  }
+  
+  .command-pill .icon {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .command-pill code {
+    font-family: 'JetBrains Mono', monospace;
+    color: #e8e8e8;
+  }
+  
+  /* ========================================
+     RESULT CARD - Plain Text Style
+     No border - use layering
+     ======================================== */
+  .result-card {
+    border-radius: 12px;
+    overflow: hidden;
+    background: #1f1f1f;
+    box-shadow: var(--shadow-lg);
+    /* NO border */
+  }
+  
+  .result-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  
+  .result-card-header .title {
+    font-size: 13px;
+    color: #888888;
+  }
+  
+  .result-card-header .copy-btn {
+    padding: 4px;
+    border-radius: 4px;
+    color: #888888;
+    opacity: 0;
+    transition: all 200ms ease-out;
+  }
+  
+  .result-card:hover .result-card-header .copy-btn {
+    opacity: 1;
+  }
+  
+  .result-card-header .copy-btn:hover {
+    background: #2a2a2a;
+    color: #e8e8e8;
+  }
+  
+  .result-card-content {
+    padding: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    background: #141414;
+    color: #e8e8e8;
+  }
+  
+  /* ========================================
+     TERMINAL PANEL - Floating Overlay
+     ======================================== */
+  .terminal-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #0d0d0d;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(12px);
+  }
+  
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  
+  .terminal-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .terminal-header-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #e8e8e8;
+  }
+  
+  .terminal-header-status {
+    font-size: 12px;
+    color: #888888;
+  }
+  
+  .terminal-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .terminal-branch {
+    font-size: 12px;
+    padding: 4px 8px;
+    color: #888888;
+  }
+  
+  .terminal-content {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    font-weight: 400;
+    background: #0d0d0d;
+    line-height: 1.6;
+  }
+  
+  .terminal-prompt {
+    color: #4ade80;
+  }
+  
+  .terminal-command {
+    color: #e8e8e8;
+  }
+  
+  .terminal-output {
+    color: #888888;
+  }
+  
+  /* Terminal Progress Bar */
+  .terminal-progress {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  
+  .terminal-progress-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .terminal-progress-controls button {
+    padding: 4px;
+    color: #888888;
+    transition: color 200ms ease-out;
+  }
+  
+  .terminal-progress-controls button:hover {
+    color: #e8e8e8;
+  }
+  
+  .terminal-progress-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: #2a2a2a;
+  }
+  
+  .terminal-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: #4a9eff;
+    transition: width 300ms ease-out;
+  }
+  
+  .terminal-progress-live {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #888888;
+  }
+  
+  .terminal-progress-live .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+  }
+  
+  /* Terminal Task Indicator */
+  .terminal-task {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  
+  .terminal-task-check {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(74, 222, 128, 0.15);
+    color: #4ade80;
+  }
+  
+  .terminal-task-name {
+    flex: 1;
+    font-size: 14px;
+    color: #e8e8e8;
+  }
+  
+  .terminal-task-progress {
+    font-size: 12px;
+    color: #888888;
+  }
+  
+  /* ========================================
+     PLAN BAR - Pill Shaped
+     ======================================== */
+  .plan-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 24px;
+    background: rgba(42, 42, 42, 0.8);
+    backdrop-filter: blur(8px);
+  }
+  
+  .plan-bar-icon {
+    width: 16px;
+    height: 16px;
+    color: #888888;
+  }
+  
+  .plan-bar-text {
+    font-size: 13px;
+    color: #e8e8e8;
+  }
+  
+  .plan-bar-count {
+    font-size: 13px;
+    color: #888888;
+  }
+  
+  /* ========================================
+     INPUT BOX - Manus Style (Fully Rounded)
+     ======================================== */
+  .chat-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 24px;
+    background: #2a2a2a;
+    border: 1px solid transparent;
+    box-shadow: var(--shadow-md);
+    transition: all 200ms ease-out;
+  }
+  
+  .chat-input:focus-within {
+    border-color: #4a9eff;
+    box-shadow: var(--shadow-md), var(--glow-blue);
+  }
+  
+  .chat-input-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: #888888;
+    transition: all 200ms ease-out;
+  }
+  
+  .chat-input-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #e8e8e8;
+  }
+  
+  .chat-input-field {
+    flex: 1;
+    background: transparent;
+    border: none;
+    font-size: 14px;
+    color: #e8e8e8;
+    outline: none;
+    resize: none;
+  }
+  
+  .chat-input-field::placeholder {
+    color: #555555;
+  }
+  
+  .chat-input-send {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #2a2a2a;
+    color: #888888;
+    transition: all 200ms ease-out;
+  }
+  
+  .chat-input-send.active {
+    background: #e8e8e8;
+    color: #1a1a1a;
+  }
+  
+  .chat-input-send.active:hover {
+    background: #ffffff;
+  }
+  
+  /* ========================================
+     SIDEBAR - Minimal Icons
+     ======================================== */
+  .sidebar-icon {
+    width: 20px;
+    height: 20px;
+    stroke-width: 1.5px;
+    color: #888888;
+    transition: color 200ms ease-out;
+  }
+  
+  .sidebar-icon:hover,
+  .sidebar-icon.active {
+    color: #e8e8e8;
+  }
+  
+  /* ========================================
+     MESSAGE CARDS - No Borders, Strong Shadows
+     ======================================== */
+  .message-card {
+    background: #1f1f1f;
+    border: none;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 200ms ease-out;
+  }
+  
+  .message-card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+  
+  /* ========================================
+     CODE BLOCKS
+     ======================================== */
+  .code-block {
+    background: #0d0d0d;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  
+  /* ========================================
+     APPROVAL CARD - Critical Style with Strong Shadow
+     ======================================== */
+  .approval-card {
+    background: #1f1f1f;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow-card);
+    border-left: 3px solid #ef4444;
+    transition: box-shadow 200ms ease-out;
+  }
+  
+  .approval-card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+  
+  .approval-card.critical {
+    border-left-color: #ef4444;
+  }
+  
+  .approval-card.warning {
+    border-left-color: #f59e0b;
+  }
+  
+  /* ========================================
+     AI PLAN CARD - Purple Accent with Strong Shadow
+     ======================================== */
+  .ai-plan-card {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 200ms ease-out;
+  }
+  
+  .ai-plan-card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+  
+  /* ========================================
+     ANIMATIONS
+     ======================================== */
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 200ms ease-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 300ms ease-out;
+  }
+  
+  /* ========================================
+     INTERACTIVE ELEMENTS
+     ======================================== */
+  .interactive-element {
+    transition: 
+      background-color 200ms ease-out,
+      box-shadow 200ms ease-out,
+      transform 150ms ease-out;
+  }
+  
+  .interactive-element:hover {
+    transform: translateY(-1px);
+  }
+  
+  /* ========================================
+     SCROLLBAR STYLING - Thin & Subtle
+     ======================================== */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+  
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
+  
+  /* ========================================
+     SELECTION STYLING
+     ======================================== */
+  ::selection {
+    background: rgba(74, 158, 255, 0.3);
+    color: #ffffff;
+  }
+  /* ========================================
+     FOCUS STATES - Accessibility
+     ======================================== */
+  *:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+  
+  /* ========================================
+     GLOBAL TRANSITIONS
+     ======================================== */
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    transition: 
+      background-color 150ms ease-out,
+      border-color 150ms ease-out,
+      color 150ms ease-out,
+      box-shadow 150ms ease-out,
+      transform 100ms ease-out;
+  }
+  
+  /* ========================================
+     CARD HOVER EFFECTS
+     ======================================== */
+  .card-hover {
+    transition: all 200ms ease-out;
+  }
+  
+  .card-hover:hover {
+    background: rgba(255, 255, 255, 0.02);
+    transform: translateY(-1px);
+  }
+}

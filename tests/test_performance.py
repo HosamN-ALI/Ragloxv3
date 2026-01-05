@@ -144,6 +144,48 @@ class MockRedis:
     
     async def close(self):
         pass
+    
+    async def eval(self, script, num_keys, *args):
+        """
+        Mock Redis eval for Lua scripts.
+        Simulates the claim_task Lua script behavior.
+        """
+        if num_keys >= 2:
+            pending_key = args[0]
+            running_key = args[1]
+            specialist = args[2] if len(args) > 2 else None
+            worker_id = args[3] if len(args) > 3 else None
+            started_at = args[4] if len(args) > 4 else None
+            running_status = args[5] if len(args) > 5 else None
+            
+            # Get tasks from pending sorted set (simulating ZREVRANGE)
+            if pending_key in self.sorted_sets:
+                tasks = sorted(self.sorted_sets[pending_key].items(), key=lambda x: x[1], reverse=True)
+                
+                for task_key, _ in tasks:
+                    # Get task specialist from storage
+                    task_data = self.data.get(task_key, {})
+                    task_specialist = task_data.get('specialist')
+                    
+                    if task_specialist == specialist:
+                        # Remove from pending (ZREM)
+                        self.sorted_sets[pending_key].pop(task_key, None)
+                        
+                        # Add to running set (SADD)
+                        if running_key not in self.sets:
+                            self.sets[running_key] = set()
+                        self.sets[running_key].add(task_key)
+                        
+                        # Update task fields (HSET)
+                        if task_key in self.data:
+                            self.data[task_key]['status'] = running_status
+                            self.data[task_key]['assigned_to'] = worker_id
+                            self.data[task_key]['started_at'] = started_at
+                            self.data[task_key]['updated_at'] = started_at
+                        
+                        return task_key
+        
+        return None
 
 
 class MockPubSub:

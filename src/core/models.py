@@ -23,6 +23,7 @@ class MissionStatus(str, Enum):
     PAUSED = "paused"
     WAITING_FOR_APPROVAL = "waiting_for_approval"  # HITL: Waiting for user approval
     COMPLETING = "completing"
+    STOPPED = "stopped"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

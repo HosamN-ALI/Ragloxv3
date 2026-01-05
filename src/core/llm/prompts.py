@@ -27,6 +27,30 @@ REFLEXION_SYSTEM_PROMPT = """You are an expert Red Team analyst and security res
 3. Recommend the best course of action (retry, modify approach, skip, pivot, escalate)
 4. Select appropriate alternative techniques/modules when needed
 5. Learn from failures to improve future attempts
+6. Interpret Nuclei scan results and prioritize exploitation paths
+
+## Nuclei Vulnerability Understanding:
+When analyzing Nuclei scan results, apply the following severity-based decision logic:
+
+### CRITICAL Severity (cvss >= 9.0):
+- Immediately recommend exploitation via AttackSpecialist
+- Examples: RCE vulnerabilities, authentication bypass, SQL injection with data access
+- Decision: "exploit" or "modify_approach" with high-success-rate modules
+
+### HIGH Severity (cvss 7.0-8.9):
+- Recommend exploitation after confirming exploitability
+- Examples: XSS with session hijacking, SSRF to internal services, privilege escalation
+- Decision: Usually "exploit", sometimes "pivot" if better paths exist
+
+### MEDIUM Severity (cvss 4.0-6.9):
+- Consider for post-exploitation or lateral movement
+- Examples: Information disclosure, weak configurations
+- Decision: "skip" during initial access phase, "exploit" during persistence phase
+
+### LOW/INFO Severity (cvss < 4.0):
+- Generally skip for exploitation
+- Examples: Version disclosure, banner grabbing, HTTP headers
+- Decision: "skip" - log for reporting but do not attack
 
 ## Key Principles:
 - Be precise and actionable in recommendations
@@ -34,6 +58,8 @@ REFLEXION_SYSTEM_PROMPT = """You are an expert Red Team analyst and security res
 - Consider the target's security posture holistically
 - Avoid repeated failures with the same approach
 - Escalate to human operators when truly stuck
+- CRITICAL/HIGH Nuclei findings should trigger AttackSpecialist involvement
+- INFO/LOW Nuclei findings should NOT trigger attacks
 
 ## Defense Detection Guidelines:
 - "antivirus": Traditional signature-based AV
@@ -45,6 +71,22 @@ REFLEXION_SYSTEM_PROMPT = """You are an expert Red Team analyst and security res
 - "amsi": Windows AMSI (Antimalware Scan Interface)
 - "applocker": Windows AppLocker restrictions
 - "credential_guard": Windows Credential Guard
+
+## CRITICAL: Defense Detection Response Strategy:
+When ANY defense is detected (AV, EDR, Firewall, etc.), you MUST:
+1. NEVER recommend "skip" - defenses can be bypassed!
+2. ALWAYS recommend "modify_approach" with specific evasion techniques:
+   - For AV: Use payload obfuscation, AMSI bypass, process hollowing
+   - For EDR: Use LOLBAS (Living Off The Land), direct syscalls, avoid child processes
+   - For Firewall: Use alternative ports, protocol tunneling, DNS exfiltration
+   - For WAF: Use encoding, fragmentation, time-based bypass
+3. Include specific modified_parameters with:
+   - use_evasion: true
+   - evasion_technique: "specific technique name"
+   - encode_payload: true (when AV detected)
+   - use_lolbas: true (when EDR detected)
+4. Only "skip" if the TARGET itself is patched/not vulnerable
+5. Only "escalate" if ALL evasion options have been exhausted
 
 ## Output Format:
 You MUST respond with valid JSON only. No explanations or text outside the JSON structure.
@@ -62,6 +104,9 @@ FAILURE_ANALYSIS_PROMPT = """Analyze the following failed task and provide recom
 ## Error Information:
 {error_details}
 
+## Nuclei Scan Context (if available):
+{nuclei_context}
+
 ## Retry History:
 - Previous attempts: {retry_count}/{max_retries}
 {previous_analysis}
@@ -72,6 +117,11 @@ FAILURE_ANALYSIS_PROMPT = """Analyze the following failed task and provide recom
 ## Mission Goals:
 {mission_goals}
 
+## Decision Guidelines for Nuclei Findings:
+- CRITICAL severity vulnerabilities: Strongly recommend "exploit" or "modify_approach"
+- HIGH severity vulnerabilities: Consider "exploit" if conditions are favorable
+- MEDIUM/LOW/INFO severity: Recommend "skip" unless in post-exploitation phase
+
 ## Required JSON Response Schema:
 ```json
 {{
@@ -80,7 +130,8 @@ FAILURE_ANALYSIS_PROMPT = """Analyze the following failed task and provide recom
         "root_cause": "Brief description of the root cause",
         "contributing_factors": ["factor1", "factor2"],
         "detected_defenses": ["antivirus", "edr", "firewall", etc.],
-        "confidence": "high|medium|low"
+        "confidence": "high|medium|low",
+        "nuclei_severity_assessment": "info_not_exploitable|low_skip|medium_defer|high_exploit|critical_immediate"
     }},
     "recommended_action": {{
         "decision": "retry|modify_approach|skip|escalate|pivot",
@@ -189,6 +240,9 @@ def build_analysis_prompt(request: AnalysisRequest) -> str:
 - Stderr: {_truncate(request.error.stderr, 300) if request.error.stderr else 'N/A'}
 - Stdout: {_truncate(request.error.stdout, 300) if request.error.stdout else 'N/A'}"""
 
+    # Format Nuclei context if available
+    nuclei_context = _build_nuclei_context(request)
+
     # Format previous analysis
     previous_analysis = ""
     if request.previous_analysis:
@@ -218,12 +272,76 @@ def build_analysis_prompt(request: AnalysisRequest) -> str:
         task_context=task_context,
         execution_context=execution_context,
         error_details=error_details,
+        nuclei_context=nuclei_context,
         retry_count=request.retry_count,
         max_retries=request.max_retries,
         previous_analysis=previous_analysis,
         available_modules=available_modules,
         mission_goals=mission_goals
     )
+
+
+def _build_nuclei_context(request: AnalysisRequest) -> str:
+    """
+    Build Nuclei-specific context for the analysis prompt.
+    
+    Extracts Nuclei scan data from the request if available.
+    Looks for nuclei data in:
+    1. request.nuclei_context (if added by caller)
+    2. request.task.metadata with nuclei_* keys
+    3. request.error.* fields for nuclei-related data
+    """
+    nuclei_data = None
+    
+    # Try to get nuclei_context attribute first
+    if hasattr(request, 'nuclei_context'):
+        nuclei_data = getattr(request, 'nuclei_context', None)
+    
+    # If not found, try to extract from task metadata
+    if not nuclei_data and hasattr(request.task, 'metadata'):
+        metadata = getattr(request.task, 'metadata', {}) or {}
+        if isinstance(metadata, dict) and any(k.startswith('nuclei') for k in metadata.keys()):
+            nuclei_data = {k: v for k, v in metadata.items() if 'nuclei' in k.lower()}
+    
+    # If still not found, check if module_used contains nuclei reference
+    if not nuclei_data and request.execution.module_used:
+        if 'nuclei' in request.execution.module_used.lower():
+            nuclei_data = {
+                'nuclei_template': request.execution.module_used,
+                'severity': 'unknown'
+            }
+    
+    if not nuclei_data:
+        return "No Nuclei scan data available"
+    
+    parts = []
+    
+    if isinstance(nuclei_data, dict):
+        template = nuclei_data.get('nuclei_template', 'Unknown')
+        severity = str(nuclei_data.get('severity', 'unknown')).lower()
+        matched_at = nuclei_data.get('matched_at', 'N/A')
+        extracted = nuclei_data.get('extracted_results', [])
+        curl_cmd = nuclei_data.get('curl_command')
+        
+        parts.append(f"- Nuclei Template: {template}")
+        parts.append(f"- Severity: {severity.upper()}")
+        parts.append(f"- Matched At: {matched_at}")
+        
+        if extracted:
+            parts.append(f"- Extracted Data: {', '.join(str(e) for e in extracted[:5])}")
+        
+        if curl_cmd:
+            parts.append(f"- Reproduction: {_truncate(curl_cmd, 200)}")
+        
+        # Add severity-based guidance
+        if severity in ('critical', 'high'):
+            parts.append("- Assessment: HIGH PRIORITY - Consider immediate exploitation")
+        elif severity == 'medium':
+            parts.append("- Assessment: MEDIUM PRIORITY - Consider for secondary attack path")
+        else:
+            parts.append("- Assessment: LOW PRIORITY - Informational, not recommended for exploitation")
+    
+    return "\n".join(parts) if parts else "No Nuclei scan data available"
 
 
 def build_module_selection_prompt(
@@ -350,6 +468,141 @@ Provide a JSON response with:
 5. reasoning: Why this pivot makes sense
 
 Respond with valid JSON only."""
+
+
+# ═══════════════════════════════════════════════════════════════
+# HYBRID INTELLIGENCE PROMPT - Combines KB + Memory + LLM
+# ═══════════════════════════════════════════════════════════════
+
+HYBRID_ANALYSIS_PROMPT = """You are an expert Red Team analyst working with RAGLOX's Hybrid Intelligence system.
+
+You have access to THREE intelligence sources:
+1. **Knowledge Base (KB)**: Embedded RX modules, Nuclei templates, MITRE ATT&CK techniques
+2. **Operational Memory**: Historical success/failure patterns from previous operations
+3. **Your Reasoning**: Apply your expertise to synthesize and decide
+
+## Task Context:
+{task_context}
+
+## Execution Details:
+{execution_context}
+
+## Error Information:
+{error_details}
+
+## KNOWLEDGE BASE CONTEXT (from embedded KB):
+{knowledge_base_context}
+
+## OPERATIONAL MEMORY (historical insights):
+{operational_memory_context}
+
+## Available Modules from KB:
+{available_modules}
+
+## Decision Framework:
+1. **If KB has a matching technique with high reliability** → Prefer KB recommendation
+2. **If Memory shows consistent patterns** → Learn from history
+3. **If novel/complex situation** → Apply your reasoning
+4. **Always explain WHY** you chose your approach
+
+## Reasoning Steps (show your work):
+1. What does the KB suggest for this error type?
+2. What does historical Memory show about similar scenarios?
+3. What's the most intelligent path forward?
+
+## Required JSON Response:
+```json
+{{
+    "analysis": {{
+        "category": "network|defense|authentication|vulnerability|technical|unknown",
+        "root_cause": "Brief description",
+        "contributing_factors": [],
+        "detected_defenses": [],
+        "confidence": "high|medium|low",
+        "kb_match_found": true/false,
+        "memory_insight_used": true/false
+    }},
+    "reasoning_chain": {{
+        "kb_suggestion": "What KB recommends",
+        "memory_pattern": "What history shows",
+        "synthesis": "Your combined reasoning"
+    }},
+    "recommended_action": {{
+        "decision": "retry|modify_approach|skip|escalate|pivot",
+        "reasoning": "Detailed explanation",
+        "delay_seconds": 0,
+        "alternative_module": null,
+        "modified_parameters": {{}},
+        "evasion_techniques": []
+    }},
+    "additional_recommendations": [],
+    "lessons_learned": [],
+    "should_update_knowledge": false,
+    "knowledge_update": null
+}}
+```
+
+Respond ONLY with valid JSON matching this schema."""
+
+
+def build_hybrid_analysis_prompt(
+    task_context: str,
+    execution_context: str,
+    error_details: str,
+    kb_context: Dict[str, Any],
+    memory_context: Dict[str, Any],
+    available_modules: str
+) -> str:
+    """
+    Build a hybrid analysis prompt that includes KB and Memory context.
+    
+    This enables the LLM to make informed decisions using:
+    - Knowledge Base: Technique recommendations, module info
+    - Operational Memory: Historical patterns, success rates
+    - LLM Reasoning: Complex situation analysis
+    """
+    # Format KB context
+    kb_str = "No Knowledge Base match found"
+    if kb_context:
+        kb_parts = []
+        if kb_context.get("matching_techniques"):
+            kb_parts.append(f"- Matching MITRE Techniques: {', '.join(kb_context['matching_techniques'])}")
+        if kb_context.get("recommended_modules"):
+            kb_parts.append(f"- KB Recommended Modules: {', '.join(kb_context['recommended_modules'][:3])}")
+        if kb_context.get("nuclei_templates"):
+            kb_parts.append(f"- Nuclei Templates Available: {len(kb_context['nuclei_templates'])} templates")
+        if kb_context.get("exploit_reliability"):
+            kb_parts.append(f"- Exploit Reliability: {kb_context['exploit_reliability']}")
+        if kb_context.get("defense_evasion_info"):
+            kb_parts.append(f"- Defense Evasion Info: {kb_context['defense_evasion_info']}")
+        kb_str = "\n".join(kb_parts) if kb_parts else "No specific KB match"
+    
+    # Format Memory context
+    memory_str = "No historical data available"
+    if memory_context:
+        mem_parts = []
+        if memory_context.get("similar_scenarios"):
+            mem_parts.append(f"- Similar scenarios in memory: {memory_context['similar_scenarios']}")
+        if memory_context.get("success_rate") is not None:
+            mem_parts.append(f"- Historical success rate: {memory_context['success_rate']:.1%}")
+        if memory_context.get("sample_count"):
+            mem_parts.append(f"- Based on {memory_context['sample_count']} similar experiences")
+        if memory_context.get("best_approach"):
+            best = memory_context['best_approach']
+            mem_parts.append(f"- Best historical approach: {best.get('module', 'N/A')} "
+                           f"(confidence: {best.get('confidence', 'N/A')})")
+        if memory_context.get("common_failures"):
+            mem_parts.append(f"- Common failure factors: {', '.join(memory_context['common_failures'][:3])}")
+        memory_str = "\n".join(mem_parts) if mem_parts else "No historical patterns"
+    
+    return HYBRID_ANALYSIS_PROMPT.format(
+        task_context=task_context,
+        execution_context=execution_context,
+        error_details=error_details,
+        knowledge_base_context=kb_str,
+        operational_memory_context=memory_str,
+        available_modules=available_modules
+    )
 
 
 # ═══════════════════════════════════════════════════════════════

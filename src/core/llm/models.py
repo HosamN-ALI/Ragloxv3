@@ -3,6 +3,7 @@
 # Pydantic models for structured LLM output validation
 # ═══════════════════════════════════════════════════════════════
 
+import json
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -237,6 +238,25 @@ class RecommendedAction(BaseModel):
     )
 
 
+class KnowledgeUpdate(BaseModel):
+    """Knowledge base update suggestion."""
+    
+    update_type: str = Field("general", description="Type of update (general, defense, technique, etc.)")
+    content: str = Field("", description="Update content/description")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+    priority: str = Field("medium", description="Priority level (low/medium/high)")
+    
+    @field_validator("content", mode="before")
+    @classmethod
+    def convert_dict_to_string(cls, v):
+        """Convert dict to string if needed."""
+        if isinstance(v, dict):
+            # Convert dict to readable string
+            parts = [f"{k}: {v}" for k, v in v.items()]
+            return "; ".join(parts)
+        return str(v) if v else ""
+
+
 class FailureAnalysis(BaseModel):
     """Complete failure analysis result."""
     
@@ -259,8 +279,47 @@ class FailureAnalysis(BaseModel):
     )
     knowledge_update: Optional[str] = Field(
         None,
-        description="Suggested knowledge base update"
+        description="Suggested knowledge base update (normalized to string)"
     )
+    
+    @field_validator("knowledge_update", mode="before")
+    @classmethod
+    def normalize_knowledge_update(cls, v):
+        """
+        Normalize knowledge_update to string.
+        
+        Handles various LLM response formats:
+        - None → None
+        - str → str (as-is)
+        - dict with 'content' key → content value
+        - dict → "key1: value1; key2: value2" format
+        - list → JSON string representation
+        - any other type → str(v)
+        """
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            # Convert dict to readable string
+            if not v:  # Empty dict
+                return None
+            if "content" in v:
+                content = v.get("content")
+                if content is None:
+                    return None
+                return str(content)
+            parts = []
+            for key, value in v.items():
+                if value is None:
+                    continue
+                if isinstance(value, (list, dict)):
+                    value = json.dumps(value, ensure_ascii=False)
+                parts.append(f"{key}: {value}")
+            return "; ".join(parts) if parts else None
+        if isinstance(v, list):
+            return json.dumps(v, ensure_ascii=False)
+        return str(v)
 
 
 class AnalysisResponse(BaseModel):

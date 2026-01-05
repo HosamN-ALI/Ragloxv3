@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+        "github.com/pashpashpash/iterm-mcp": {
+            "command": "node",
+            "args": [
+                "/root/.vscode-server/iterm-mcp/build/index.js"
+            ]
+        }
+    }
+}

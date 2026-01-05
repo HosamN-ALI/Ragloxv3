@@ -1,0 +1,8 @@
+/* ═══════════════════════════════════════════════════════════════
+   RAGLOX v3.0 - App-specific styles
+   Most styling is handled by TailwindCSS in index.css
+   ═══════════════════════════════════════════════════════════════ */
+
+#root {
+  min-height: 100vh;
+}

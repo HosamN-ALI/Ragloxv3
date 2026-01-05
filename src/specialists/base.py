@@ -6,7 +6,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
-from uuid import uuid4
+from uuid import uuid4, UUID
 import asyncio
 import logging
 
@@ -374,16 +374,14 @@ class BaseSpecialist(ABC):
         Returns:
             Task ID
         """
-        from uuid import UUID
-        
         task = Task(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             type=task_type,
             specialist=target_specialist,
             priority=priority,
-            target_id=UUID(target_id) if target_id else None,
-            vuln_id=UUID(vuln_id) if vuln_id else None,
-            cred_id=UUID(cred_id) if cred_id else None,
+            target_id=self._safe_uuid(target_id) if target_id else None,
+            vuln_id=self._safe_uuid(vuln_id) if vuln_id else None,
+            cred_id=self._safe_uuid(cred_id) if cred_id else None,
             rx_module=rx_module,
             result_data=metadata
         )
@@ -392,7 +390,7 @@ class BaseSpecialist(ABC):
         
         # Publish task event
         event = NewTaskEvent(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             task_id=task.id,
             type=task_type,
             specialist=target_specialist,
@@ -423,11 +421,10 @@ class BaseSpecialist(ABC):
         Returns:
             Target ID
         """
-        from uuid import UUID
         from ..core.models import Priority
         
         target = Target(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             ip=ip,
             hostname=hostname,
             os=os,
@@ -439,7 +436,7 @@ class BaseSpecialist(ABC):
         
         # Publish event
         event = NewTargetEvent(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             target_id=target.id,
             ip=ip,
             priority=Priority(priority),
@@ -477,11 +474,9 @@ class BaseSpecialist(ABC):
         Returns:
             Vulnerability ID
         """
-        from uuid import UUID
-        
         vuln = Vulnerability(
-            mission_id=UUID(self._current_mission_id),
-            target_id=UUID(target_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
+            target_id=self._safe_uuid(target_id),
             type=vuln_type,
             name=name,
             description=description,
@@ -496,9 +491,9 @@ class BaseSpecialist(ABC):
         
         # Publish event
         event = NewVulnEvent(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             vuln_id=vuln.id,
-            target_id=UUID(target_id),
+            target_id=self._safe_uuid(target_id),
             severity=severity,
             exploit_available=exploit_available
         )
@@ -534,11 +529,9 @@ class BaseSpecialist(ABC):
         Returns:
             Credential ID
         """
-        from uuid import UUID
-        
         cred = Credential(
-            mission_id=UUID(self._current_mission_id),
-            target_id=UUID(target_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
+            target_id=self._safe_uuid(target_id),
             type=cred_type,
             username=username,
             domain=domain,
@@ -553,9 +546,9 @@ class BaseSpecialist(ABC):
         
         # Publish event
         event = NewCredEvent(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             cred_id=cred.id,
-            target_id=UUID(target_id),
+            target_id=self._safe_uuid(target_id),
             type=cred_type,
             privilege_level=privilege_level
         )
@@ -563,6 +556,33 @@ class BaseSpecialist(ABC):
         
         self.logger.info(f"Added credential: {username}@{domain or 'local'}")
         return cred_id
+    
+    def _safe_uuid(self, value: Any) -> UUID:
+        """
+        Safely convert value to UUID, generating new one if invalid.
+        
+        This method handles various input formats:
+        - Already a UUID object
+        - Valid UUID string
+        - Prefixed string like "target:uuid-here"
+        - Invalid input (returns new UUID)
+        
+        Args:
+            value: Value to convert to UUID
+            
+        Returns:
+            UUID object
+        """
+        if isinstance(value, UUID):
+            return value
+        if isinstance(value, str):
+            try:
+                # Remove prefixes like "target:", "vuln:", "cred:", "task:"
+                clean_value = value.split(":")[-1] if ":" in value else value
+                return UUID(clean_value)
+            except (ValueError, TypeError):
+                pass
+        return uuid4()
     
     async def add_established_session(
         self,
@@ -587,17 +607,16 @@ class BaseSpecialist(ABC):
         Returns:
             Session ID
         """
-        from uuid import UUID
         from ..core.models import SessionType
         
         session = Session(
-            mission_id=UUID(self._current_mission_id),
-            target_id=UUID(target_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
+            target_id=self._safe_uuid(target_id),
             type=SessionType(session_type),
             user=user,
             privilege=privilege,
-            via_vuln_id=UUID(via_vuln_id) if via_vuln_id else None,
-            via_cred_id=UUID(via_cred_id) if via_cred_id else None
+            via_vuln_id=self._safe_uuid(via_vuln_id) if via_vuln_id else None,
+            via_cred_id=self._safe_uuid(via_cred_id) if via_cred_id else None
         )
         
         session_id = await self.blackboard.add_session(session)
@@ -605,9 +624,9 @@ class BaseSpecialist(ABC):
         # Publish event
         needs_privesc = privilege in (PrivilegeLevel.USER, PrivilegeLevel.UNKNOWN)
         event = NewSessionEvent(
-            mission_id=UUID(self._current_mission_id),
+            mission_id=self._safe_uuid(self._current_mission_id),
             session_id=session.id,
-            target_id=UUID(target_id),
+            target_id=self._safe_uuid(target_id),
             privilege=privilege,
             needs_privesc=needs_privesc
         )

@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════
 # RAGLOX v3.0 - Core Module
-# Blackboard Architecture Components
+# Blackboard Architecture Components + Hybrid Intelligence Layer
 # ═══════════════════════════════════════════════════════════════
 
 from .blackboard import Blackboard
@@ -53,6 +53,47 @@ from .knowledge import (
     Tactic,
     KnowledgeStats,
 )
+from .scanners import (
+    NucleiScanner,
+    NucleiScanResult,
+    NucleiVulnerability,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Hybrid Intelligence Layer Components (NEW)
+# ═══════════════════════════════════════════════════════════════
+
+from .operational_memory import (
+    OperationalMemory,
+    DecisionRecord,
+    DecisionOutcome,
+    OperationalContext,
+)
+from .intelligence_coordinator import (
+    IntelligenceCoordinator,
+    AttackPath as IntelligentAttackPath,
+    AttackPathType,
+    StrategicAnalysis,
+)
+from .strategic_scorer import (
+    StrategicScorer,
+    VulnerabilityScore,
+    PrioritizedTarget,
+    RiskLevel,
+    ExploitDifficulty,
+    ImpactScope,
+)
+from .stealth_profiles import (
+    StealthManager,
+    StealthLevel,
+    StealthParameters,
+    DetectionRisk,
+    DefenseType,
+    DefenseProfile,
+    OperationFootprint,
+    STEALTH_PROFILES,
+    EVASION_TECHNIQUES,
+)
 
 __all__ = [
     # Blackboard
@@ -103,4 +144,38 @@ __all__ = [
     "Technique",
     "Tactic",
     "KnowledgeStats",
+    # Scanners
+    "NucleiScanner",
+    "NucleiScanResult",
+    "NucleiVulnerability",
+    # ═══════════════════════════════════════════════════════════
+    # Hybrid Intelligence Layer (NEW)
+    # ═══════════════════════════════════════════════════════════
+    # Operational Memory
+    "OperationalMemory",
+    "DecisionRecord",
+    "DecisionOutcome",
+    "OperationalContext",
+    # Intelligence Coordinator
+    "IntelligenceCoordinator",
+    "IntelligentAttackPath",
+    "AttackPathType",
+    "StrategicAnalysis",
+    # Strategic Scorer
+    "StrategicScorer",
+    "VulnerabilityScore",
+    "PrioritizedTarget",
+    "RiskLevel",
+    "ExploitDifficulty",
+    "ImpactScope",
+    # Stealth Manager
+    "StealthManager",
+    "StealthLevel",
+    "StealthParameters",
+    "DetectionRisk",
+    "DefenseType",
+    "DefenseProfile",
+    "OperationFootprint",
+    "STEALTH_PROFILES",
+    "EVASION_TECHNIQUES",
 ]

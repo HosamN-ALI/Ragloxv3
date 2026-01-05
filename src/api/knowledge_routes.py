@@ -3,7 +3,7 @@
 # REST API endpoints for knowledge base queries
 # ═══════════════════════════════════════════════════════════════
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -75,6 +75,10 @@ class KnowledgeStatsResponse(BaseModel):
     modules_per_executor: Dict[str, int]
     memory_size_mb: float
     loaded: bool
+    # Nuclei Templates stats
+    total_nuclei_templates: int = 0
+    nuclei_by_severity: Dict[str, int] = {}
+    nuclei_by_protocol: Dict[str, int] = {}
 
 
 class PaginatedResponse(BaseModel):
@@ -486,3 +490,200 @@ async def get_privesc_modules(
     """
     modules = knowledge.get_privesc_modules(platform=platform)
     return [ModuleResponse(**m) for m in modules[:limit]]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Nuclei Templates Endpoints
+# ═══════════════════════════════════════════════════════════════
+
+class NucleiTemplateResponse(BaseModel):
+    """Nuclei template response model."""
+    template_id: str
+    name: str
+    severity: str = ""
+    protocol: List[str] = []
+    cve_id: Union[str, List[str]] = ""  # Can be string or list
+    cwe_id: Union[str, List[str]] = ""  # Can be string or list
+    cvss_score: Optional[float] = None
+    cvss_metrics: Optional[str] = ""
+    tags: List[str] = []
+    description: Optional[str] = ""
+    author: Optional[str] = ""
+    reference: List[str] = []  # References list
+    file_path: Optional[str] = ""
+
+
+@router.get("/nuclei/templates", response_model=PaginatedResponse)
+async def list_nuclei_templates(
+    severity: Optional[str] = Query(None, description="Filter by severity (critical, high, medium, low, info)"),
+    protocol: Optional[str] = Query(None, description="Filter by protocol (http, tcp, dns, ssl)"),
+    tag: Optional[str] = Query(None, description="Filter by tag (rce, sqli, xss, cve)"),
+    limit: int = Query(100, ge=1, le=500, description="Page size"),
+    offset: int = Query(0, ge=0, description="Page offset"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> PaginatedResponse:
+    """
+    List Nuclei templates with filtering and pagination.
+    
+    - **severity**: Filter by severity level
+    - **protocol**: Filter by protocol type
+    - **tag**: Filter by tag
+    - **limit**: Maximum items to return
+    - **offset**: Pagination offset
+    """
+    templates, total = knowledge.list_nuclei_templates(
+        severity=severity,
+        protocol=protocol,
+        tag=tag,
+        limit=limit,
+        offset=offset
+    )
+    
+    return PaginatedResponse(
+        items=templates,
+        total=total,
+        limit=limit,
+        offset=offset
+    )
+
+
+@router.get("/nuclei/templates/{template_id}", response_model=NucleiTemplateResponse)
+async def get_nuclei_template(
+    template_id: str,
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> NucleiTemplateResponse:
+    """
+    Get a specific Nuclei template by ID.
+    
+    - **template_id**: Nuclei template ID (e.g., CVE-2021-44228)
+    """
+    template = knowledge.get_nuclei_template(template_id)
+    
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Nuclei template {template_id} not found"
+        )
+    
+    return NucleiTemplateResponse(**template)
+
+
+@router.get("/nuclei/search", response_model=List[NucleiTemplateResponse])
+async def search_nuclei_templates(
+    q: str = Query(..., min_length=1, max_length=200, description="Search query"),
+    severity: Optional[str] = Query(None, description="Filter by severity"),
+    protocol: Optional[str] = Query(None, description="Filter by protocol"),
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> List[NucleiTemplateResponse]:
+    """
+    Search Nuclei templates by keyword.
+    
+    Searches in template IDs, names, CVE IDs, and tags.
+    
+    - **q**: Search query
+    - **severity**: Optional severity filter
+    - **protocol**: Optional protocol filter
+    - **limit**: Maximum results
+    """
+    templates = knowledge.search_nuclei_templates(
+        query=q,
+        severity=severity,
+        protocol=protocol,
+        limit=limit
+    )
+    
+    return [NucleiTemplateResponse(**t) for t in templates]
+
+
+@router.get("/nuclei/cve/{cve_id}", response_model=NucleiTemplateResponse)
+async def get_nuclei_template_by_cve(
+    cve_id: str,
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> NucleiTemplateResponse:
+    """
+    Get Nuclei template for a specific CVE.
+    
+    - **cve_id**: CVE ID (e.g., CVE-2021-44228)
+    """
+    template = knowledge.get_nuclei_template_by_cve(cve_id)
+    
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No Nuclei template found for {cve_id}"
+        )
+    
+    return NucleiTemplateResponse(**template)
+
+
+@router.get("/nuclei/severity/{severity}", response_model=List[NucleiTemplateResponse])
+async def get_nuclei_templates_by_severity(
+    severity: str,
+    limit: int = Query(100, ge=1, le=500, description="Maximum results"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> List[NucleiTemplateResponse]:
+    """
+    Get Nuclei templates by severity level.
+    
+    - **severity**: Severity level (critical, high, medium, low, info)
+    - **limit**: Maximum results
+    """
+    templates = knowledge.get_nuclei_templates_by_severity(severity, limit=limit)
+    return [NucleiTemplateResponse(**t) for t in templates]
+
+
+@router.get("/nuclei/critical", response_model=List[NucleiTemplateResponse])
+async def get_critical_nuclei_templates(
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> List[NucleiTemplateResponse]:
+    """
+    Get critical severity Nuclei templates.
+    
+    Shortcut for /nuclei/severity/critical.
+    """
+    templates = knowledge.get_nuclei_critical_templates(limit=limit)
+    return [NucleiTemplateResponse(**t) for t in templates]
+
+
+@router.get("/nuclei/rce", response_model=List[NucleiTemplateResponse])
+async def get_rce_nuclei_templates(
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> List[NucleiTemplateResponse]:
+    """
+    Get Remote Code Execution (RCE) Nuclei templates.
+    
+    Filters templates with 'rce' tag.
+    """
+    templates = knowledge.get_nuclei_rce_templates(limit=limit)
+    return [NucleiTemplateResponse(**t) for t in templates]
+
+
+@router.get("/nuclei/sqli", response_model=List[NucleiTemplateResponse])
+async def get_sqli_nuclei_templates(
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> List[NucleiTemplateResponse]:
+    """
+    Get SQL Injection (SQLi) Nuclei templates.
+    
+    Filters templates with 'sqli' tag.
+    """
+    templates = knowledge.get_nuclei_sqli_templates(limit=limit)
+    return [NucleiTemplateResponse(**t) for t in templates]
+
+
+@router.get("/nuclei/xss", response_model=List[NucleiTemplateResponse])
+async def get_xss_nuclei_templates(
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    knowledge: EmbeddedKnowledge = Depends(get_knowledge_base)
+) -> List[NucleiTemplateResponse]:
+    """
+    Get Cross-Site Scripting (XSS) Nuclei templates.
+    
+    Filters templates with 'xss' tag.
+    """
+    templates = knowledge.get_nuclei_xss_templates(limit=limit)
+    return [NucleiTemplateResponse(**t) for t in templates]

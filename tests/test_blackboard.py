@@ -165,6 +165,49 @@ def mock_redis():
         pubsub.close = AsyncMock()
         return pubsub
     
+    # Mock eval - simulates Lua script for claim_task
+    async def mock_eval(script, num_keys, *args):
+        """
+        Mock Redis eval for Lua scripts.
+        Simulates the claim_task Lua script behavior.
+        """
+        if num_keys >= 2:
+            pending_key = args[0]
+            running_key = args[1]
+            specialist = args[2] if len(args) > 2 else None
+            worker_id = args[3] if len(args) > 3 else None
+            started_at = args[4] if len(args) > 4 else None
+            running_status = args[5] if len(args) > 5 else None
+            
+            # Get tasks from pending sorted set (simulating ZREVRANGE)
+            if pending_key in sorted_sets:
+                tasks = sorted(sorted_sets[pending_key].items(), key=lambda x: x[1], reverse=True)
+                
+                for task_key, _ in tasks:
+                    # Get task specialist from storage
+                    task_data = storage.get(task_key, {})
+                    task_specialist = task_data.get('specialist')
+                    
+                    if task_specialist == specialist:
+                        # Remove from pending (ZREM)
+                        sorted_sets[pending_key].pop(task_key, None)
+                        
+                        # Add to running set (SADD)
+                        if running_key not in sets:
+                            sets[running_key] = set()
+                        sets[running_key].add(task_key)
+                        
+                        # Update task fields (HSET)
+                        if task_key in storage:
+                            storage[task_key]['status'] = running_status
+                            storage[task_key]['assigned_to'] = worker_id
+                            storage[task_key]['started_at'] = started_at
+                            storage[task_key]['updated_at'] = started_at
+                        
+                        return task_key
+        
+        return None
+    
     mock.hset = mock_hset
     mock.hgetall = mock_hgetall
     mock.hincrby = mock_hincrby
@@ -181,6 +224,7 @@ def mock_redis():
     mock.ping = mock_ping
     mock.publish = mock_publish
     mock.pubsub = mock_pubsub
+    mock.eval = mock_eval
     
     return mock
 
