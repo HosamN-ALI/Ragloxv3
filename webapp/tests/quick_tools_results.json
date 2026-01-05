@@ -1,0 +1,93 @@
+{
+  "timestamp": "2026-01-05T07:00:38.409150",
+  "target": {
+    "hostname": "localhost",
+    "http_port": 8088,
+    "ssh_port": 2222
+  },
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "errors": 0,
+    "success_rate": 100.0
+  },
+  "results": [
+    {
+      "name": "Nmap Ping Sweep",
+      "status": "PASSED",
+      "duration_ms": 1919,
+      "details": {
+        "hosts_found": 5,
+        "network": "172.28.0.0/24"
+      },
+      "error": null
+    },
+    {
+      "name": "Nmap Port Scan",
+      "status": "PASSED",
+      "duration_ms": 81,
+      "details": {
+        "open_ports": [
+          2222,
+          8088
+        ],
+        "target": "localhost"
+      },
+      "error": null
+    },
+    {
+      "name": "Nmap Service Detection",
+      "status": "PASSED",
+      "duration_ms": 6312,
+      "details": {
+        "services": [
+          {
+            "port": "2222",
+            "state": "open",
+            "service": "ssh",
+            "version": "OpenSSH 8.9p1 Ubuntu 3ubuntu0.13 (Ubuntu Linux; protocol 2.0)"
+          },
+          {
+            "port": "8088",
+            "state": "open",
+            "service": "http",
+            "version": "nginx 1.18.0 (Ubuntu)"
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "name": "Netcat Port Probe",
+      "status": "PASSED",
+      "duration_ms": 11,
+      "details": {
+        "http_open": true,
+        "ssh_open": true
+      },
+      "error": null
+    },
+    {
+      "name": "Curl HTTP Request",
+      "status": "PASSED",
+      "duration_ms": 19,
+      "details": {
+        "status_code": "200",
+        "server": "nginx/1.18.0 (Ubuntu)",
+        "url": "http://localhost:8088"
+      },
+      "error": null
+    },
+    {
+      "name": "Nuclei Vulnerability Scan",
+      "status": "PASSED",
+      "duration_ms": 106467,
+      "details": {
+        "vulnerabilities": 0,
+        "vulns": []
+      },
+      "error": null
+    }
+  ]
+}
