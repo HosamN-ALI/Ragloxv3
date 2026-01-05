@@ -32,6 +32,14 @@ from .defense_intelligence import (
     EvasionPriority,
 )
 
+from .strategic_attack_planner import (
+    StrategicAttackPlanner,
+    AttackCampaign,
+    CampaignStage,
+    AttackStage,
+    OptimizationGoal,
+)
+
 __version__ = "3.0.0"
 __author__ = "RAGLOX Team"
 
@@ -51,4 +59,11 @@ __all__ = [
     "EvasionTechnique",
     "EvasionPlan",
     "EvasionPriority",
+    
+    # Strategic Attack Planner
+    "StrategicAttackPlanner",
+    "AttackCampaign",
+    "CampaignStage",
+    "AttackStage",
+    "OptimizationGoal",
 ]
