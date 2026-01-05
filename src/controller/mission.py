@@ -35,6 +35,11 @@ from ..core.stats_manager import StatsManager, get_stats_manager
 from ..core.transaction_manager import TransactionManager, get_transaction_manager
 from ..core.retry_policy import get_retry_manager
 
+# ═══════════════════════════════════════════════════════════════
+# REL-02: Approval State Persistence
+# ═══════════════════════════════════════════════════════════════
+from ..core.approval_store import ApprovalStore, get_approval_store
+
 
 class MissionController:
     """
@@ -82,6 +87,10 @@ class MissionController:
             "attack": [],
         }
         
+        # Thread-safety locks
+        self._specialist_lock = asyncio.Lock()  # Lock for specialist initialization
+        self._c2_managers_lock = asyncio.Lock()  # Lock for C2 manager access
+        
         # Monitor interval (seconds)
         self._monitor_interval = 5
         
@@ -90,10 +99,10 @@ class MissionController:
         self._task_timeout = timedelta(minutes=5)  # Tasks stale after 5 minutes
         self._max_task_retries = 3  # Max retries before marking FAILED
         
-        # HITL: Pending approval actions
+        # HITL: Pending approval actions (in-memory cache, backed by Redis)
         self._pending_approvals: Dict[str, ApprovalAction] = {}
         
-        # HITL: Chat history per mission
+        # HITL: Chat history per mission (in-memory cache, backed by Redis)
         self._chat_history: Dict[str, List[ChatMessage]] = {}
         
         # ═══════════════════════════════════════════════════════════
@@ -120,6 +129,12 @@ class MissionController:
         # Retry Manager: Centralized retry policies
         self.retry_manager = get_retry_manager()
         
+        # ═══════════════════════════════════════════════════════════
+        # REL-02: Approval Store for Persistent State
+        # ═══════════════════════════════════════════════════════════
+        self.approval_store = get_approval_store()
+        self._approval_store_initialized = False
+        
         # Register MissionController with shutdown manager
         self.shutdown_manager.register_component(
             name="mission_controller",
@@ -131,7 +146,7 @@ class MissionController:
         
         self.logger.info(
             "MissionController initialized with all management systems: "
-            "SessionManager, ShutdownManager, StatsManager, TransactionManager, RetryManager"
+            "SessionManager, ShutdownManager, StatsManager, TransactionManager, RetryManager, ApprovalStore"
         )
     
     # ═══════════════════════════════════════════════════════════
@@ -228,7 +243,19 @@ class MissionController:
         
         # Start Session Manager for this mission
         await self.session_manager.start()
-        self.logger.info(f\"SessionManager started for mission {mission_id}\")\n        \n        # Start Stats Manager for real-time metrics\n        await self.stats_manager.start()\n        self.logger.info(\"StatsManager started for real-time monitoring\")\n        \n        # Update mission start metric\n        await self.stats_manager.increment_counter(\n            \"missions_total\",\n            labels={\"status\": \"started\"}\n        )\n        \n        # Update status to running
+        self.logger.info(f"SessionManager started for mission {mission_id}")
+        
+        # Start Stats Manager for real-time metrics
+        await self.stats_manager.start()
+        self.logger.info("StatsManager started for real-time monitoring")
+        
+        # Update mission start metric
+        await self.stats_manager.increment_counter(
+            "missions_total",
+            labels={"status": "started"}
+        )
+        
+        # Update status to running
         await self.blackboard.update_mission_status(mission_id, MissionStatus.RUNNING)
         
         # Update local tracking
@@ -449,25 +476,76 @@ class MissionController:
     # ═══════════════════════════════════════════════════════════
     
     async def _start_specialists(self, mission_id: str) -> None:
-        """Start specialist workers for a mission."""
+        """
+        Start specialist workers for a mission.
+        
+        Uses async lock to prevent race conditions when multiple missions
+        start concurrently. Ensures thread-safe initialization of:
+        - Recon and Attack specialists
+        - Real Exploitation Engine (singleton)
+        - C2 Session Manager (per mission)
+        """
         self.logger.info(f"Starting specialists for mission {mission_id}")
         
-        # Create and start Recon specialist
-        # Each specialist gets its own Blackboard instance to avoid connection conflicts
-        recon = ReconSpecialist(
-            blackboard=Blackboard(settings=self.settings),
-            settings=self.settings
-        )
-        await recon.start(mission_id)
-        self._specialists["recon"].append(recon)
-        
-        # Create and start Attack specialist
-        attack = AttackSpecialist(
-            blackboard=Blackboard(settings=self.settings),
-            settings=self.settings
-        )
-        await attack.start(mission_id)
-        self._specialists["attack"].append(attack)
+        # Use lock to prevent race conditions during specialist initialization
+        async with self._specialist_lock:
+            # Create and start Recon specialist
+            # Each specialist gets its own Blackboard instance to avoid connection conflicts
+            recon = ReconSpecialist(
+                blackboard=Blackboard(settings=self.settings),
+                settings=self.settings
+            )
+            await recon.start(mission_id)
+            self._specialists["recon"].append(recon)
+            
+            # Create and start Attack specialist
+            # Initialize Real Exploitation Engine if enabled
+            real_exploitation_engine = None
+            c2_manager = None
+            use_real_exploits = False
+            
+            if self.settings.use_real_exploits:
+                try:
+                    from ..specialists.attack_integration import get_real_exploitation_engine
+                    from ..exploitation.c2.session_manager import C2SessionManager
+                    
+                    # get_real_exploitation_engine() is already a singleton
+                    real_exploitation_engine = get_real_exploitation_engine()
+                    
+                    # Initialize C2SessionManager for this mission
+                    c2_manager = C2SessionManager(
+                        encryption_enabled=self.settings.c2_encryption_enabled,
+                        data_dir=self.settings.c2_data_dir
+                    )
+                    
+                    use_real_exploits = True
+                    self.logger.info("🎯 Attack specialist using REAL EXPLOITATION")
+                    self.logger.info(f"🌐 C2 Session Manager initialized for mission {mission_id}")
+                except ImportError as e:
+                    self.logger.error(f"Missing exploitation module: {e}")
+                    self.logger.warning("Attack specialist falling back to SIMULATION mode")
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f"Invalid configuration for real exploitation: {e}")
+                    self.logger.warning("Attack specialist falling back to SIMULATION mode")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize real exploitation: {e}")
+                    self.logger.warning("Attack specialist falling back to SIMULATION mode")
+            
+            attack = AttackSpecialist(
+                blackboard=Blackboard(settings=self.settings),
+                settings=self.settings,
+                use_real_exploits=use_real_exploits,
+                real_exploitation_engine=real_exploitation_engine
+            )
+            await attack.start(mission_id)
+            self._specialists["attack"].append(attack)
+            
+            # Store C2SessionManager reference for cleanup (thread-safe)
+            if c2_manager:
+                async with self._c2_managers_lock:
+                    if not hasattr(self, '_c2_managers'):
+                        self._c2_managers = {}
+                    self._c2_managers[mission_id] = c2_manager
         
         self.logger.info(f"Specialists started for mission {mission_id}")
     
@@ -480,6 +558,21 @@ class MissionController:
             for specialist in specialists:
                 if specialist.current_mission == mission_id:
                     await specialist.stop()
+        
+        # Cleanup C2 sessions for this mission (thread-safe)
+        async with self._c2_managers_lock:
+            if hasattr(self, '_c2_managers') and mission_id in self._c2_managers:
+                try:
+                    c2_manager = self._c2_managers[mission_id]
+                    await c2_manager.cleanup_all_sessions()
+                    del self._c2_managers[mission_id]
+                    self.logger.info(f"🌐 C2 sessions cleaned up for mission {mission_id}")
+                except AttributeError as e:
+                    self.logger.error(f"C2 manager missing method: {e}")
+                except (IOError, OSError) as e:
+                    self.logger.error(f"I/O error cleaning up C2 sessions: {e}")
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up C2 sessions: {e}")
         
         self.logger.info(f"Specialists stopped for mission {mission_id}")
     
@@ -717,6 +810,20 @@ class MissionController:
     # HITL (Human-in-the-Loop) Methods
     # ═══════════════════════════════════════════════════════════
     
+    async def _ensure_approval_store_connected(self) -> None:
+        """
+        REL-02: Ensure approval store is connected to Redis.
+        
+        Lazily initializes the ApprovalStore connection when first needed.
+        """
+        if not self._approval_store_initialized:
+            try:
+                await self.approval_store.connect(self.blackboard.redis if self.blackboard._redis else None)
+                self._approval_store_initialized = True
+                self.logger.debug("ApprovalStore connected to Redis")
+            except Exception as e:
+                self.logger.warning(f"Failed to connect ApprovalStore to Redis: {e}. Using in-memory fallback.")
+    
     async def request_approval(
         self,
         mission_id: str,
@@ -727,6 +834,8 @@ class MissionController:
         
         This pauses the mission (sets status to WAITING_FOR_APPROVAL)
         and broadcasts an ApprovalRequestEvent via WebSocket.
+        
+        REL-02: Approvals are now persisted to Redis for durability.
         
         Args:
             mission_id: Mission ID
@@ -740,8 +849,16 @@ class MissionController:
         
         action_id = str(action.id)
         
-        # Store pending approval
+        # REL-02: Store in-memory cache
         self._pending_approvals[action_id] = action
+        
+        # REL-02: Persist to Redis for durability
+        await self._ensure_approval_store_connected()
+        try:
+            await self.approval_store.save_approval(action)
+            self.logger.debug(f"Approval {action_id} persisted to Redis")
+        except Exception as e:
+            self.logger.warning(f"Failed to persist approval {action_id} to Redis: {e}")
         
         # Update mission status to waiting
         await self.blackboard.update_mission_status(mission_id, MissionStatus.WAITING_FOR_APPROVAL)
@@ -776,27 +893,40 @@ class MissionController:
         self,
         mission_id: str,
         action_id: str,
-        user_comment: Optional[str] = None
+        user_comment: Optional[str] = None,
+        audit_info: Optional[Dict[str, str]] = None
     ) -> bool:
         """
         Approve a pending action and resume mission execution.
+        
+        REL-02: Updates are persisted to Redis with audit logging.
         
         Args:
             mission_id: Mission ID
             action_id: Action ID to approve
             user_comment: Optional comment from user
+            audit_info: Optional audit info (IP address, user agent)
             
         Returns:
             True if approved successfully
         """
         self.logger.info(f"✅ Approving action: {action_id}")
         
-        # Verify action exists
-        if action_id not in self._pending_approvals:
+        # REL-02: Try to get from Redis first, fallback to in-memory
+        action = None
+        if action_id in self._pending_approvals:
+            action = self._pending_approvals[action_id]
+        else:
+            # Try to restore from Redis
+            await self._ensure_approval_store_connected()
+            try:
+                action = await self.approval_store.get_approval(action_id)
+            except Exception as e:
+                self.logger.warning(f"Failed to get approval from Redis: {e}")
+        
+        if not action:
             self.logger.error(f"Action {action_id} not found in pending approvals")
             return False
-        
-        action = self._pending_approvals[action_id]
         
         # Verify mission matches
         if str(action.mission_id) != mission_id:
@@ -808,8 +938,21 @@ class MissionController:
         action.responded_at = datetime.utcnow()
         action.user_comment = user_comment
         
-        # Remove from pending
-        del self._pending_approvals[action_id]
+        # Remove from in-memory pending
+        if action_id in self._pending_approvals:
+            del self._pending_approvals[action_id]
+        
+        # REL-02: Update in Redis with audit log
+        try:
+            await self.approval_store.update_approval_status(
+                action_id=action_id,
+                status=ApprovalStatus.APPROVED,
+                responded_by=audit_info.get("user_id") if audit_info else None,
+                user_comment=user_comment,
+                audit_info=audit_info
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to update approval in Redis: {e}")
         
         # Resume mission
         await self.blackboard.update_mission_status(mission_id, MissionStatus.RUNNING)
@@ -844,28 +987,41 @@ class MissionController:
         mission_id: str,
         action_id: str,
         rejection_reason: Optional[str] = None,
-        user_comment: Optional[str] = None
+        user_comment: Optional[str] = None,
+        audit_info: Optional[Dict[str, str]] = None
     ) -> bool:
         """
         Reject a pending action and prompt AnalysisSpecialist for alternative.
+        
+        REL-02: Updates are persisted to Redis with audit logging.
         
         Args:
             mission_id: Mission ID
             action_id: Action ID to reject
             rejection_reason: Reason for rejection
             user_comment: Optional comment from user
+            audit_info: Optional audit info (IP address, user agent)
             
         Returns:
             True if rejected successfully
         """
         self.logger.info(f"❌ Rejecting action: {action_id}")
         
-        # Verify action exists
-        if action_id not in self._pending_approvals:
+        # REL-02: Try to get from Redis first, fallback to in-memory
+        action = None
+        if action_id in self._pending_approvals:
+            action = self._pending_approvals[action_id]
+        else:
+            # Try to restore from Redis
+            await self._ensure_approval_store_connected()
+            try:
+                action = await self.approval_store.get_approval(action_id)
+            except Exception as e:
+                self.logger.warning(f"Failed to get approval from Redis: {e}")
+        
+        if not action:
             self.logger.error(f"Action {action_id} not found in pending approvals")
             return False
-        
-        action = self._pending_approvals[action_id]
         
         # Verify mission matches
         if str(action.mission_id) != mission_id:
@@ -878,8 +1034,22 @@ class MissionController:
         action.rejection_reason = rejection_reason
         action.user_comment = user_comment
         
-        # Remove from pending
-        del self._pending_approvals[action_id]
+        # Remove from in-memory pending
+        if action_id in self._pending_approvals:
+            del self._pending_approvals[action_id]
+        
+        # REL-02: Update in Redis with audit log
+        try:
+            await self.approval_store.update_approval_status(
+                action_id=action_id,
+                status=ApprovalStatus.REJECTED,
+                responded_by=audit_info.get("user_id") if audit_info else None,
+                rejection_reason=rejection_reason,
+                user_comment=user_comment,
+                audit_info=audit_info
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to update approval in Redis: {e}")
         
         # Publish rejection response
         response_event = ApprovalResponseEvent(
@@ -913,6 +1083,8 @@ class MissionController:
         """
         Get all pending approval requests for a mission.
         
+        REL-02: Combines in-memory cache with Redis for complete results.
+        
         Args:
             mission_id: Mission ID
             
@@ -920,25 +1092,68 @@ class MissionController:
             List of pending approval actions
         """
         pending = []
+        seen_ids = set()
+        
+        # First, add from in-memory cache
         for action_id, action in self._pending_approvals.items():
             if str(action.mission_id) == mission_id:
-                # Handle both enum and string values for action_type and risk_level
-                action_type = action.action_type.value if hasattr(action.action_type, 'value') else str(action.action_type)
-                risk_level = action.risk_level.value if hasattr(action.risk_level, 'value') else str(action.risk_level)
-                
-                pending.append({
-                    "action_id": action_id,
-                    "action_type": action_type,
-                    "action_description": action.action_description,
-                    "target_ip": action.target_ip,
-                    "risk_level": risk_level,
-                    "risk_reasons": action.risk_reasons,
-                    "potential_impact": action.potential_impact,
-                    "command_preview": action.command_preview,
-                    "requested_at": action.requested_at.isoformat(),
-                    "expires_at": action.expires_at.isoformat() if action.expires_at else None
-                })
+                seen_ids.add(action_id)
+                pending.append(self._approval_to_dict(action))
+        
+        # REL-02: Also get from Redis (may have approvals from previous session)
+        await self._ensure_approval_store_connected()
+        try:
+            redis_approvals = await self.approval_store.get_pending_approvals(mission_id)
+            for action in redis_approvals:
+                action_id = str(action.id)
+                if action_id not in seen_ids:
+                    # Restore to in-memory cache
+                    self._pending_approvals[action_id] = action
+                    pending.append(self._approval_to_dict(action))
+        except Exception as e:
+            self.logger.warning(f"Failed to get pending approvals from Redis: {e}")
+        
         return pending
+    
+    def _approval_to_dict(self, action: ApprovalAction) -> Dict[str, Any]:
+        """Convert an ApprovalAction to a dictionary for API response."""
+        action_type = action.action_type.value if hasattr(action.action_type, 'value') else str(action.action_type)
+        risk_level = action.risk_level.value if hasattr(action.risk_level, 'value') else str(action.risk_level)
+        
+        return {
+            "action_id": str(action.id),
+            "action_type": action_type,
+            "action_description": action.action_description,
+            "target_ip": action.target_ip,
+            "risk_level": risk_level,
+            "risk_reasons": action.risk_reasons,
+            "potential_impact": action.potential_impact,
+            "command_preview": action.command_preview,
+            "requested_at": action.requested_at.isoformat(),
+            "expires_at": action.expires_at.isoformat() if action.expires_at else None
+        }
+    
+    async def get_approval_stats(self, mission_id: str) -> Dict[str, Any]:
+        """
+        REL-02: Get approval statistics for a mission.
+        
+        Args:
+            mission_id: Mission ID
+            
+        Returns:
+            Approval statistics
+        """
+        await self._ensure_approval_store_connected()
+        try:
+            return await self.approval_store.get_approval_stats(mission_id)
+        except Exception as e:
+            self.logger.warning(f"Failed to get approval stats from Redis: {e}")
+            # Fallback to in-memory count
+            pending_count = sum(
+                1 for a in self._pending_approvals.values()
+                if str(a.mission_id) == mission_id
+            )
+            return {"pending": pending_count, "completed": 0, "approved": 0, "rejected": 0, "expired": 0}
     
     async def _resume_approved_task(self, mission_id: str, action: ApprovalAction) -> None:
         """
@@ -1013,6 +1228,8 @@ class MissionController:
         This allows users to provide instructions or ask questions
         during mission execution.
         
+        REL-02: Messages are persisted to Redis for durability.
+        
         Args:
             mission_id: Mission ID
             content: Message content
@@ -1038,10 +1255,17 @@ class MissionController:
             related_action_id=UUID(related_action_id) if related_action_id and len(related_action_id) == 36 else None
         )
         
-        # Store in history
+        # Store in in-memory history
         if mission_id not in self._chat_history:
             self._chat_history[mission_id] = []
         self._chat_history[mission_id].append(message)
+        
+        # REL-02: Persist to Redis
+        await self._ensure_approval_store_connected()
+        try:
+            await self.approval_store.save_chat_message(message)
+        except Exception as e:
+            self.logger.warning(f"Failed to persist chat message to Redis: {e}")
         
         # Publish chat event
         event = ChatEvent(
@@ -1066,6 +1290,12 @@ class MissionController:
         if response:
             self._chat_history[mission_id].append(response)
             
+            # REL-02: Persist response to Redis
+            try:
+                await self.approval_store.save_chat_message(response)
+            except Exception as e:
+                self.logger.warning(f"Failed to persist response to Redis: {e}")
+            
             # Publish response event
             response_event = ChatEvent(
                 mission_id=UUID(mission_id),
@@ -1086,6 +1316,8 @@ class MissionController:
         """
         Get chat history for a mission.
         
+        REL-02: Retrieves from Redis for persistence across restarts.
+        
         Args:
             mission_id: Mission ID
             limit: Max messages to return
@@ -1093,6 +1325,28 @@ class MissionController:
         Returns:
             List of chat messages
         """
+        # REL-02: Try to get from Redis first
+        await self._ensure_approval_store_connected()
+        try:
+            redis_messages = await self.approval_store.get_chat_history(mission_id, limit)
+            if redis_messages:
+                # Update in-memory cache with Redis data
+                self._chat_history[mission_id] = redis_messages
+                return [
+                    {
+                        "id": str(msg.id),
+                        "role": msg.role,
+                        "content": msg.content,
+                        "timestamp": msg.timestamp.isoformat(),
+                        "related_task_id": str(msg.related_task_id) if msg.related_task_id else None,
+                        "related_action_id": str(msg.related_action_id) if msg.related_action_id else None
+                    }
+                    for msg in redis_messages[-limit:]
+                ]
+        except Exception as e:
+            self.logger.warning(f"Failed to get chat history from Redis: {e}")
+        
+        # Fallback to in-memory history
         history = self._chat_history.get(mission_id, [])
         return [
             {
