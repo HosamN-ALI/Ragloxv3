@@ -1,0 +1,72 @@
+{
+  "total": 5,
+  "passed": 3,
+  "failed": 2,
+  "success_rate": 60.0,
+  "results": [
+    {
+      "name": "AdaptiveLearningLayer Integration",
+      "passed": true,
+      "duration_ms": 0,
+      "error": null,
+      "details": {
+        "operations_learned": 3,
+        "success_rate": "66.7%",
+        "patterns_discovered": 1,
+        "recommendations_made": 1,
+        "param_suggestions": 2,
+        "skip_recommendation": false
+      }
+    },
+    {
+      "name": "DefenseIntelligence Integration",
+      "passed": {
+        "waf": 1
+      },
+      "duration_ms": 0,
+      "error": null,
+      "details": {
+        "defenses_detected": 2,
+        "defense_types": [
+          "firewall",
+          "waf"
+        ],
+        "evasion_techniques_suggested": 5,
+        "target1_defenses": 1,
+        "target2_defenses": 1
+      }
+    },
+    {
+      "name": "StrategicAttackPlanner Integration",
+      "passed": false,
+      "duration_ms": 0,
+      "error": "'dict' object has no attribute 'estimated_duration_minutes'",
+      "details": {}
+    },
+    {
+      "name": "Full Stack Integration",
+      "passed": false,
+      "duration_ms": 0,
+      "error": null,
+      "details": {
+        "strategic_value": "medium",
+        "attack_paths_found": 1,
+        "vuln_composite_score": "0.72",
+        "campaign_stages": 5,
+        "learning_operations": 4,
+        "defenses_detected": 1
+      }
+    },
+    {
+      "name": "Performance Benchmarks",
+      "passed": true,
+      "duration_ms": 7,
+      "error": null,
+      "details": {
+        "campaign_generation_ms": 0,
+        "learning_100_ops_ms": 2,
+        "defense_detection_50x_ms": 4
+      }
+    }
+  ]
+}

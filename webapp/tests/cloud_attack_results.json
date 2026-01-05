@@ -1,0 +1,110 @@
+{
+  "test_suite": "RAGLOX v3.0 Cloud Attack Scenarios",
+  "timestamp": "2026-01-05T08:04:23.518206",
+  "summary": {
+    "total_tests": 3,
+    "passed_tests": 3,
+    "success_rate": 100.0,
+    "total_resources_compromised": 9,
+    "total_credentials_obtained": 4,
+    "total_data_accessed_gb": 692.8,
+    "total_privilege_escalations": 3,
+    "total_detection_events": 2,
+    "total_cost_impact_usd": 82.002
+  },
+  "results": [
+    {
+      "scenario_name": "AWS S3 Bucket Exploitation",
+      "provider": "CloudProvider.AWS",
+      "success": true,
+      "execution_time_ms": 3,
+      "stages_completed": 4,
+      "total_stages": 4,
+      "resources_compromised": [
+        "s3://prod-logs",
+        "s3://dev-artifacts"
+      ],
+      "credentials_obtained": [],
+      "data_accessed_gb": 37.8,
+      "privilege_escalations": 0,
+      "lateral_moves": 0,
+      "persistence_established": true,
+      "detection_events": 0,
+      "cost_incurred_usd": 3.402,
+      "impact_severity": "critical",
+      "lessons_learned": [
+        "Public S3 buckets are a critical security risk",
+        "Versioning should be enabled on all buckets",
+        "Backup buckets often contain sensitive credentials",
+        "CloudTrail provides detection but may be disabled/bypassed",
+        "S3 event notifications can be abused for persistence"
+      ],
+      "timestamp": "2026-01-05T08:04:23.512701"
+    },
+    {
+      "scenario_name": "Azure Privilege Escalation",
+      "provider": "CloudProvider.AZURE",
+      "success": true,
+      "execution_time_ms": 0,
+      "stages_completed": 4,
+      "total_stages": 4,
+      "resources_compromised": [
+        "Subscription: Production",
+        "Subscription: Development",
+        "Subscription: Testing"
+      ],
+      "credentials_obtained": [
+        "Azure SP: 12345678-1234-1234-1234-123456789012",
+        "Global Admin role"
+      ],
+      "data_accessed_gb": 0.0,
+      "privilege_escalations": 2,
+      "lateral_moves": 3,
+      "persistence_established": true,
+      "detection_events": 1,
+      "cost_incurred_usd": 0.0,
+      "impact_severity": "critical",
+      "lessons_learned": [
+        "Azure AD RBAC misconfigurations enable privilege escalation",
+        "Service principals can be abused for persistence",
+        "Global Admin role provides full tenant access",
+        "Owner role on subscriptions is extremely powerful",
+        "Azure AD logs provide detection capabilities"
+      ],
+      "timestamp": "2026-01-05T08:04:23.513600"
+    },
+    {
+      "scenario_name": "GCP Service Account Abuse",
+      "provider": "CloudProvider.GCP",
+      "success": true,
+      "execution_time_ms": 4,
+      "stages_completed": 4,
+      "total_stages": 4,
+      "resources_compromised": [
+        "gs://project-backups",
+        "gs://user-uploads",
+        "gs://logs-archive",
+        "Cloud Function: data-processor"
+      ],
+      "credentials_obtained": [
+        "GCP SA: compute@project-123.iam.gserviceaccount.com",
+        "GCP SA: app-service@project-123.iam.gserviceaccount.com"
+      ],
+      "data_accessed_gb": 655.0,
+      "privilege_escalations": 1,
+      "lateral_moves": 3,
+      "persistence_established": true,
+      "detection_events": 1,
+      "cost_incurred_usd": 78.6,
+      "impact_severity": "high",
+      "lessons_learned": [
+        "Exposed service account keys are critical vulnerabilities",
+        "Editor role can be abused for privilege escalation",
+        "GCS buckets often contain sensitive data",
+        "Cloud Functions can be used for persistence",
+        "Cloud Audit Logs provide good detection coverage"
+      ],
+      "timestamp": "2026-01-05T08:04:23.518152"
+    }
+  ]
+}

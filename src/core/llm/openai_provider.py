@@ -25,6 +25,7 @@ from .base import (
     ContextLengthError,
 )
 from .prompts import extract_json_from_response
+from ..retry_policy import get_retry_manager
 
 
 class OpenAIProvider(LLMProvider):
@@ -55,7 +56,9 @@ class OpenAIProvider(LLMProvider):
     
     def __init__(self, config: LLMConfig):
         """
-        Initialize OpenAI provider.
+        ═══════════════════════════════════════════════════════════════
+        GAP-C06 FIX: Initialize OpenAI provider with centralized retry
+        ═══════════════════════════════════════════════════════════════
         
         Args:
             config: LLM configuration with API key
@@ -71,6 +74,11 @@ class OpenAIProvider(LLMProvider):
         # Rate limiting state
         self._request_times: List[float] = []
         self._token_counts: List[tuple[float, int]] = []
+        
+        # ═══════════════════════════════════════════════════════════
+        # GAP-C06 FIX: Centralized Retry Policy with Circuit Breaker
+        # ═══════════════════════════════════════════════════════════
+        self._retry_manager = get_retry_manager()
     
     @property
     def provider_name(self) -> str:
@@ -227,105 +235,134 @@ class OpenAIProvider(LLMProvider):
         return request
     
     async def _make_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Make API request with retry logic."""
-        last_error = None
-        delay = self.config.retry_delay
+        """
+        ═══════════════════════════════════════════════════════════════
+        GAP-C06 FIX: Make API request with centralized retry & circuit breaker
+        ═══════════════════════════════════════════════════════════════
         
-        for attempt in range(self.config.max_retries + 1):
-            try:
-                client = await self._get_client()
-                response = await client.post(
-                    "/chat/completions",
-                    json=request_data,
+        Uses centralized retry_manager with 'llm_api' policy:
+        - 5 retry attempts
+        - Exponential backoff (1s → 120s)
+        - Circuit breaker (10 failures threshold)
+        - Intelligent error classification
+        """
+        # Wrap the actual request with retry policy
+        return await self._retry_manager.execute_with_retry(
+            func=self._make_single_request,
+            args=(request_data,),
+            kwargs={},
+            policy_name="llm_api",
+            context={
+                "provider": self.provider_name,
+                "model": request_data.get("model"),
+                "operation": "chat_completion"
+            }
+        )
+    
+    async def _make_single_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make a single API request (no retry logic - handled by retry_manager).
+        
+        This method focuses on making the request and raising appropriate exceptions
+        for the retry manager to handle.
+        """
+        client = await self._get_client()
+        
+        try:
+            response = await client.post(
+                "/chat/completions",
+                json=request_data,
+            )
+            
+            # Handle response codes
+            if response.status_code == 200:
+                return response.json()
+            
+            elif response.status_code == 429:
+                # Rate limited - retry manager will handle
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError(
+                    "Rate limit exceeded",
+                    provider=self.provider_name,
+                    retry_after=retry_after
+                )
+            
+            elif response.status_code == 401:
+                # Authentication error - non-retryable
+                raise AuthenticationError(
+                    "Invalid API key",
+                    provider=self.provider_name
+                )
+            
+            elif response.status_code == 404:
+                # Model not available - non-retryable
+                raise ModelNotAvailableError(
+                    request_data.get("model", "unknown"),
+                    provider=self.provider_name
+                )
+            
+            elif response.status_code == 400:
+                # Bad request - check if context length error
+                error_data = response.json().get("error", {})
+                error_type = error_data.get("type", "")
+                
+                if "context_length" in error_type.lower() or "context_length" in error_data.get("message", "").lower():
+                    raise ContextLengthError(
+                        tokens_used=0,
+                        max_tokens=0,
+                        provider=self.provider_name
+                    )
+                
+                raise LLMError(
+                    f"Bad request: {error_data.get('message', 'Unknown error')}",
+                    provider=self.provider_name,
+                    details=error_data
+                )
+            
+            elif response.status_code in [502, 503, 504]:
+                # Server errors - retryable
+                raise LLMError(
+                    f"service_unavailable: {response.status_code}",
+                    provider=self.provider_name
+                )
+            
+            else:
+                # Other errors
+                error_data = response.json() if response.content else {}
+                raise LLMError(
+                    f"API error: {response.status_code}",
+                    provider=self.provider_name,
+                    details=error_data
                 )
                 
-                # Handle response codes
-                if response.status_code == 200:
-                    return response.json()
+        except httpx.TimeoutException as e:
+            # Timeout - retryable
+            self._error_count += 1
+            raise LLMError(
+                f"timeout: {str(e)}",
+                provider=self.provider_name
+            )
                 
-                elif response.status_code == 429:
-                    # Rate limited
-                    retry_after = int(response.headers.get("Retry-After", delay))
-                    if attempt < self.config.max_retries:
-                        self.logger.warning(f"Rate limited, retrying in {retry_after}s")
-                        await asyncio.sleep(retry_after)
-                        delay *= self.config.retry_multiplier
-                        continue
-                    raise RateLimitError(
-                        "Rate limit exceeded",
-                        provider=self.provider_name,
-                        retry_after=retry_after
-                    )
-                
-                elif response.status_code == 401:
-                    raise AuthenticationError(
-                        "Invalid API key",
-                        provider=self.provider_name
-                    )
-                
-                elif response.status_code == 404:
-                    raise ModelNotAvailableError(
-                        request_data.get("model", "unknown"),
-                        provider=self.provider_name
-                    )
-                
-                elif response.status_code == 400:
-                    error_data = response.json().get("error", {})
-                    error_type = error_data.get("type", "")
-                    
-                    if "context_length" in error_type.lower() or "context_length" in error_data.get("message", "").lower():
-                        raise ContextLengthError(
-                            tokens_used=0,  # Would need to count
-                            max_tokens=0,
-                            provider=self.provider_name
-                        )
-                    
-                    raise LLMError(
-                        f"Bad request: {error_data.get('message', 'Unknown error')}",
-                        provider=self.provider_name,
-                        details=error_data
-                    )
-                
-                else:
-                    error_data = response.json() if response.content else {}
-                    raise LLMError(
-                        f"API error: {response.status_code}",
-                        provider=self.provider_name,
-                        details=error_data
-                    )
-                    
-            except httpx.TimeoutException as e:
-                last_error = e
-                if attempt < self.config.max_retries:
-                    self.logger.warning(f"Timeout, retrying in {delay}s")
-                    await asyncio.sleep(delay)
-                    delay *= self.config.retry_multiplier
-                    continue
-                    
-            except httpx.RequestError as e:
-                last_error = e
-                if attempt < self.config.max_retries:
-                    self.logger.warning(f"Request error: {e}, retrying in {delay}s")
-                    await asyncio.sleep(delay)
-                    delay *= self.config.retry_multiplier
-                    continue
-            
-            except (RateLimitError, AuthenticationError, ModelNotAvailableError, ContextLengthError):
-                raise
-            
-            except Exception as e:
-                last_error = e
-                self._error_count += 1
-                if attempt < self.config.max_retries:
-                    self.logger.warning(f"Error: {e}, retrying in {delay}s")
-                    await asyncio.sleep(delay)
-                    delay *= self.config.retry_multiplier
-                    continue
+        except httpx.RequestError as e:
+            # Connection error - retryable
+            self._error_count += 1
+            raise LLMError(
+                f"connection_error: {str(e)}",
+                provider=self.provider_name
+            )
         
-        raise LLMError(
-            f"Request failed after {self.config.max_retries + 1} attempts: {last_error}",
-            provider=self.provider_name
-        )
+        except (RateLimitError, AuthenticationError, ModelNotAvailableError, ContextLengthError):
+            # Re-raise specific errors
+            self._error_count += 1
+            raise
+        
+        except Exception as e:
+            # Unexpected error
+            self._error_count += 1
+            raise LLMError(
+                f"Unexpected error: {str(e)}",
+                provider=self.provider_name
+            )
     
     def _parse_response(
         self,

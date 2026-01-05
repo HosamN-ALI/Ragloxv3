@@ -1,0 +1,125 @@
+{
+  "test_suite": "RAGLOX v3.0 Advanced Attack Scenarios",
+  "timestamp": "2026-01-05T08:02:33.969894",
+  "summary": {
+    "total_tests": 4,
+    "passed_tests": 4,
+    "success_rate": 100.0,
+    "total_targets_compromised": 6,
+    "total_credentials_obtained": 4,
+    "total_lateral_moves": 3,
+    "total_data_exfiltrated_mb": 51.5,
+    "total_detection_events": 2,
+    "average_evasion_rate": 0.8125,
+    "total_execution_time_ms": 12
+  },
+  "results": [
+    {
+      "scenario_name": "Multi-Stage Attack Chain",
+      "success": true,
+      "execution_time_ms": 7,
+      "stages_completed": 6,
+      "total_stages": 6,
+      "targets_compromised": [
+        "DC01.contoso.local",
+        "WEB01.contoso.local",
+        "SQL01.contoso.local",
+        "FILE01.contoso.local"
+      ],
+      "credentials_obtained": [
+        "administrator:ntlm",
+        "svc_sql:plaintext",
+        "backup_admin:ntlm",
+        "CONTOSO\\Administrator:krbtgt_hash"
+      ],
+      "persistence_established": false,
+      "data_exfiltrated_mb": 0.0,
+      "lateral_moves": 3,
+      "detection_events": 0,
+      "evasion_success_rate": 1.0,
+      "error_count": 0,
+      "recovery_attempts": 0,
+      "lessons_learned": [
+        "SMBGhost exploitation highly effective against unpatched Windows servers",
+        "Token impersonation reliable for privilege escalation",
+        "PSExec/WMI effective for lateral movement in domain environments",
+        "DCSync most reliable method for domain admin compromise"
+      ],
+      "timestamp": "2026-01-05T08:02:33.962132"
+    },
+    {
+      "scenario_name": "Persistence Mechanisms",
+      "success": true,
+      "execution_time_ms": 2,
+      "stages_completed": 4,
+      "total_stages": 4,
+      "targets_compromised": [
+        "DC01.contoso.local"
+      ],
+      "credentials_obtained": [],
+      "persistence_established": true,
+      "data_exfiltrated_mb": 0.0,
+      "lateral_moves": 0,
+      "detection_events": 0,
+      "evasion_success_rate": 1.0,
+      "error_count": 0,
+      "recovery_attempts": 0,
+      "lessons_learned": [
+        "Multiple persistence methods increase probability of maintaining access",
+        "Registry keys easiest but most detectable",
+        "WMI subscriptions most stealthy but complex",
+        "Service installation requires high privileges"
+      ],
+      "timestamp": "2026-01-05T08:02:33.965092"
+    },
+    {
+      "scenario_name": "Data Exfiltration",
+      "success": true,
+      "execution_time_ms": 0,
+      "stages_completed": 4,
+      "total_stages": 4,
+      "targets_compromised": [
+        "DC01.contoso.local"
+      ],
+      "credentials_obtained": [],
+      "persistence_established": false,
+      "data_exfiltrated_mb": 51.5,
+      "lateral_moves": 0,
+      "detection_events": 2,
+      "evasion_success_rate": 0.5,
+      "error_count": 0,
+      "recovery_attempts": 0,
+      "lessons_learned": [
+        "DNS tunneling highly effective for small data exfiltration",
+        "HTTPS upload blends with normal traffic",
+        "SMB transfers easily detected by network monitoring",
+        "Cloud storage abuse excellent for large data volumes",
+        "Multiple exfiltration methods increase success probability"
+      ],
+      "timestamp": "2026-01-05T08:02:33.966057"
+    },
+    {
+      "scenario_name": "Error Recovery",
+      "success": true,
+      "execution_time_ms": 3,
+      "stages_completed": 3,
+      "total_stages": 4,
+      "targets_compromised": [],
+      "credentials_obtained": [],
+      "persistence_established": false,
+      "data_exfiltrated_mb": 0.0,
+      "lateral_moves": 0,
+      "detection_events": 0,
+      "evasion_success_rate": 0.75,
+      "error_count": 4,
+      "recovery_attempts": 4,
+      "lessons_learned": [
+        "Timeout errors often resolved by retry with increased duration",
+        "Access denied requires alternative credential or method",
+        "Network unreachability needs target validation",
+        "Detection events trigger evasion technique switching"
+      ],
+      "timestamp": "2026-01-05T08:02:33.969846"
+    }
+  ]
+}

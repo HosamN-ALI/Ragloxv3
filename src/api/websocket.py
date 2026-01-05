@@ -464,3 +464,208 @@ async def broadcast_chat_message(
         },
         "timestamp": datetime.utcnow().isoformat()
     })
+
+
+# ═══════════════════════════════════════════════════════════════
+# INTEGRATION: Real-Time Statistics Streaming
+# ═══════════════════════════════════════════════════════════════
+
+@websocket_router.websocket("/ws/stats")
+async def stats_websocket(websocket: WebSocket):
+    """
+    Real-time statistics WebSocket endpoint.
+    
+    Streams system-wide metrics and statistics in real-time.
+    
+    Updates every 1 second with:
+    - Mission statistics
+    - System metrics
+    - Retry policy metrics
+    - Circuit breaker states
+    - Session health
+    - Performance metrics
+    """
+    from ..core.stats_manager import get_stats_manager
+    from ..core.retry_policy import get_retry_manager
+    from ..core.session_manager import get_session_manager
+    
+    await websocket.accept()
+    
+    try:
+        # Get manager instances
+        stats_manager = get_stats_manager()
+        retry_manager = get_retry_manager()
+        
+        # Send welcome message
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Connected to RAGLOX Stats Stream",
+            "timestamp": datetime.utcnow().isoformat(),
+            "stream_interval_ms": 1000
+        })
+        
+        # Start streaming
+        while True:
+            try:
+                # Collect all stats
+                stats = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "type": "stats_update"
+                }
+                
+                # System metrics from StatsManager
+                if stats_manager:
+                    system_stats = await stats_manager.get_all_metrics()
+                    stats["system"] = system_stats
+                
+                # Retry policy metrics
+                if retry_manager:
+                    retry_stats = {}
+                    for policy_name, policy in retry_manager._policies.items():
+                        circuit_state = policy.circuit_breaker.state.value
+                        retry_stats[policy_name] = {
+                            "circuit_state": circuit_state,
+                            "failure_count": policy.circuit_breaker.failure_count,
+                            "success_count": policy.circuit_breaker.success_count,
+                            "total_attempts": policy.metrics.total_attempts,
+                            "total_successes": policy.metrics.successful_attempts,
+                            "total_failures": policy.metrics.failed_attempts,
+                            "avg_latency_ms": policy.metrics.average_latency_ms
+                        }
+                    stats["retry_policies"] = retry_stats
+                
+                # Send update
+                await websocket.send_json(stats)
+                
+                # Wait before next update
+                await asyncio.sleep(1.0)
+                
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                # Log error but continue streaming
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Stats collection error: {str(e)}",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                await asyncio.sleep(1.0)
+                
+    except WebSocketDisconnect:
+        pass
+
+
+@websocket_router.websocket("/ws/circuit-breakers")
+async def circuit_breakers_websocket(websocket: WebSocket):
+    """
+    Circuit Breaker monitoring WebSocket endpoint.
+    
+    Real-time monitoring of all circuit breaker states with alerts.
+    
+    Sends alerts when:
+    - Circuit breaker opens (system protection activated)
+    - Circuit breaker half-opens (attempting recovery)
+    - Circuit breaker closes (system recovered)
+    - High failure rates detected
+    """
+    from ..core.retry_policy import get_retry_manager, CircuitState
+    
+    await websocket.accept()
+    
+    try:
+        retry_manager = get_retry_manager()
+        
+        # Send welcome message
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Connected to Circuit Breaker Monitor",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+        # Track previous states to detect changes
+        previous_states = {}
+        
+        while True:
+            try:
+                alerts = []
+                current_states = {}
+                
+                # Check all circuit breakers
+                for policy_name, policy in retry_manager._policies.items():
+                    cb = policy.circuit_breaker
+                    current_state = cb.state
+                    current_states[policy_name] = current_state
+                    
+                    # Detect state changes
+                    previous_state = previous_states.get(policy_name)
+                    if previous_state != current_state:
+                        alert = {
+                            "type": "state_change",
+                            "policy": policy_name,
+                            "old_state": previous_state.value if previous_state else "unknown",
+                            "new_state": current_state.value,
+                            "failure_count": cb.failure_count,
+                            "success_count": cb.success_count,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                        
+                        # Add severity
+                        if current_state == CircuitState.OPEN:
+                            alert["severity"] = "critical"
+                            alert["message"] = f"🔴 Circuit breaker '{policy_name}' OPENED - System protection activated"
+                        elif current_state == CircuitState.HALF_OPEN:
+                            alert["severity"] = "warning"
+                            alert["message"] = f"🟡 Circuit breaker '{policy_name}' HALF-OPEN - Attempting recovery"
+                        elif current_state == CircuitState.CLOSED:
+                            alert["severity"] = "info"
+                            alert["message"] = f"🟢 Circuit breaker '{policy_name}' CLOSED - System recovered"
+                        
+                        alerts.append(alert)
+                
+                # Send alerts if any state changed
+                if alerts:
+                    await websocket.send_json({
+                        "type": "alerts",
+                        "alerts": alerts,
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                
+                # Send periodic status update (every 5 seconds)
+                status = {
+                    "type": "status",
+                    "circuit_breakers": {}
+                }
+                
+                for policy_name, policy in retry_manager._policies.items():
+                    cb = policy.circuit_breaker
+                    status["circuit_breakers"][policy_name] = {
+                        "state": cb.state.value,
+                        "failure_count": cb.failure_count,
+                        "success_count": cb.success_count,
+                        "failure_threshold": cb.failure_threshold,
+                        "health_percentage": (
+                            cb.success_count / (cb.success_count + cb.failure_count) * 100
+                            if (cb.success_count + cb.failure_count) > 0 else 100.0
+                        )
+                    }
+                
+                await websocket.send_json(status)
+                
+                # Update previous states
+                previous_states = current_states
+                
+                # Wait 5 seconds
+                await asyncio.sleep(5.0)
+                
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Circuit breaker monitoring error: {str(e)}",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                await asyncio.sleep(5.0)
+                
+    except WebSocketDisconnect:
+        pass

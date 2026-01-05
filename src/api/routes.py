@@ -965,3 +965,173 @@ async def get_chat_history(
     
     history = await controller.get_chat_history(mission_id, limit)
     return [ChatMessageResponse(**msg) for msg in history]
+
+
+# ═══════════════════════════════════════════════════════════════
+# INTEGRATION: Real-Time Statistics & Monitoring Endpoints
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/stats/system")
+async def get_system_stats() -> Dict[str, Any]:
+    """
+    Get current system-wide statistics.
+    
+    Returns metrics for:
+    - Active missions
+    - Total tasks processed
+    - System health
+    - Performance metrics
+    """
+    from ..core.stats_manager import get_stats_manager
+    
+    stats_manager = get_stats_manager()
+    stats = await stats_manager.get_all_metrics()
+    
+    return {
+        "status": "success",
+        "data": stats,
+        "timestamp": stats.get("timestamp")
+    }
+
+
+@router.get("/stats/retry-policies")
+async def get_retry_policy_stats() -> Dict[str, Any]:
+    """
+    Get statistics for all retry policies.
+    
+    Returns:
+    - Success/failure rates
+    - Circuit breaker states
+    - Average latencies
+    - Retry attempts
+    """
+    from ..core.retry_policy import get_retry_manager
+    
+    retry_manager = get_retry_manager()
+    
+    policies_stats = {}
+    for policy_name, policy in retry_manager._policies.items():
+        cb = policy.circuit_breaker
+        metrics = policy.metrics
+        
+        policies_stats[policy_name] = {
+            "circuit_breaker": {
+                "state": cb.state.value,
+                "failure_count": cb.failure_count,
+                "success_count": cb.success_count,
+                "failure_threshold": cb.failure_threshold,
+                "health_percentage": (
+                    cb.success_count / (cb.success_count + cb.failure_count) * 100
+                    if (cb.success_count + cb.failure_count) > 0 else 100.0
+                )
+            },
+            "metrics": {
+                "total_attempts": metrics.total_attempts,
+                "successful_attempts": metrics.successful_attempts,
+                "failed_attempts": metrics.failed_attempts,
+                "avg_latency_ms": metrics.average_latency_ms,
+                "success_rate": (
+                    metrics.successful_attempts / metrics.total_attempts * 100
+                    if metrics.total_attempts > 0 else 0.0
+                )
+            },
+            "policy_config": {
+                "max_retries": policy.max_retries,
+                "base_delay": policy.base_delay,
+                "max_delay": policy.max_delay,
+                "strategy": policy.backoff_strategy.value
+            }
+        }
+    
+    return {
+        "status": "success",
+        "data": policies_stats
+    }
+
+
+@router.get("/stats/sessions")
+async def get_session_stats() -> Dict[str, Any]:
+    """
+    Get statistics for active sessions.
+    
+    Returns:
+    - Total active sessions
+    - Session health scores
+    - Timeout status
+    - Recent activity
+    """
+    from ..core.session_manager import get_session_manager
+    from ..core.config import get_settings
+    
+    settings = get_settings()
+    
+    # Get session manager (requires blackboard)
+    # Note: This requires access to blackboard from app state
+    try:
+        session_manager = get_session_manager(
+            blackboard=None,  # Will use cached instance if available
+            settings=settings
+        )
+        
+        stats = await session_manager.get_statistics()
+        
+        return {
+            "status": "success",
+            "data": stats
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to retrieve session stats: {str(e)}",
+            "data": {}
+        }
+
+
+@router.get("/stats/circuit-breakers")
+async def get_circuit_breaker_states() -> Dict[str, Any]:
+    """
+    Get current states of all circuit breakers.
+    
+    Quick endpoint for monitoring circuit breaker health.
+    """
+    from ..core.retry_policy import get_retry_manager, CircuitState
+    
+    retry_manager = get_retry_manager()
+    
+    states = {}
+    alerts = []
+    
+    for policy_name, policy in retry_manager._policies.items():
+        cb = policy.circuit_breaker
+        state = cb.state
+        
+        states[policy_name] = {
+            "state": state.value,
+            "healthy": state == CircuitState.CLOSED,
+            "failure_count": cb.failure_count,
+            "success_count": cb.success_count
+        }
+        
+        # Generate alerts for open circuits
+        if state == CircuitState.OPEN:
+            alerts.append({
+                "severity": "critical",
+                "policy": policy_name,
+                "message": f"Circuit breaker '{policy_name}' is OPEN - System protection active"
+            })
+        elif state == CircuitState.HALF_OPEN:
+            alerts.append({
+                "severity": "warning",
+                "policy": policy_name,
+                "message": f"Circuit breaker '{policy_name}' is HALF-OPEN - Recovery attempt in progress"
+            })
+    
+    return {
+        "status": "success",
+        "data": {
+            "circuit_breakers": states,
+            "alerts": alerts,
+            "healthy_count": sum(1 for s in states.values() if s["healthy"]),
+            "total_count": len(states)
+        }
+    }

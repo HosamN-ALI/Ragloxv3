@@ -1,0 +1,52 @@
+{
+  "reconnaissance:T1046": {
+    "scan_type": "full",
+    "service_detection": 1.0
+  },
+  "persistence:T1547": {
+    "key": "run",
+    "hive": "HKLM"
+  },
+  "exploit:general": {
+    "method": "primary"
+  },
+  "credential_harvest:general": {
+    "method": "primary"
+  },
+  "data_exfiltration:general": {
+    "method": "primary"
+  },
+  "exploit:T1210": {
+    "exploit": "SMBGhost",
+    "evasion": 1.0
+  },
+  "lateral_movement:T1021": {
+    "credential": "administrator",
+    "method": "psexec"
+  },
+  "domain_compromise:T1003": {
+    "method": "dcsync",
+    "credential": "administrator"
+  },
+  "data_exfiltration:T1041": {
+    "methods": [
+      "dns",
+      "https",
+      "smb",
+      "cloud"
+    ]
+  },
+  "cloud_enumeration:T1580": {
+    "scan_type": "public_buckets"
+  },
+  "cloud_data_access:T1530": {
+    "buckets": [
+      "company-backups",
+      "prod-logs",
+      "dev-artifacts"
+    ]
+  },
+  "cloud_privilege_escalation:T1548": {
+    "method": "rbac_misconfiguration"
+  }
+}

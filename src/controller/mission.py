@@ -26,6 +26,15 @@ from ..core.config import Settings, get_settings
 from ..specialists.recon import ReconSpecialist
 from ..specialists.attack import AttackSpecialist
 
+# ═══════════════════════════════════════════════════════════════
+# INTEGRATION: New Management Systems
+# ═══════════════════════════════════════════════════════════════
+from ..core.session_manager import SessionManager, get_session_manager
+from ..core.shutdown_manager import ShutdownManager, get_shutdown_manager
+from ..core.stats_manager import StatsManager, get_stats_manager
+from ..core.transaction_manager import TransactionManager, get_transaction_manager
+from ..core.retry_policy import get_retry_manager
+
 
 class MissionController:
     """
@@ -86,6 +95,44 @@ class MissionController:
         
         # HITL: Chat history per mission
         self._chat_history: Dict[str, List[ChatMessage]] = {}
+        
+        # ═══════════════════════════════════════════════════════════
+        # INTEGRATION: Initialize Management Systems
+        # ═══════════════════════════════════════════════════════════
+        
+        # Session Manager: Tracks session lifecycle, heartbeat, timeout
+        self.session_manager = SessionManager(
+            blackboard=self.blackboard,
+            settings=self.settings
+        )
+        
+        # Shutdown Manager: Graceful shutdown coordination
+        self.shutdown_manager = ShutdownManager()
+        
+        # Stats Manager: Real-time metrics and monitoring
+        self.stats_manager = StatsManager()
+        
+        # Transaction Manager: ACID operations with rollback
+        self.transaction_manager = TransactionManager(
+            blackboard=self.blackboard
+        )
+        
+        # Retry Manager: Centralized retry policies
+        self.retry_manager = get_retry_manager()
+        
+        # Register MissionController with shutdown manager
+        self.shutdown_manager.register_component(
+            name="mission_controller",
+            component=self,
+            priority=100,  # High priority - shutdown first
+            shutdown_timeout=60.0,
+            shutdown_method="stop"
+        )
+        
+        self.logger.info(
+            "MissionController initialized with all management systems: "
+            "SessionManager, ShutdownManager, StatsManager, TransactionManager, RetryManager"
+        )
     
     # ═══════════════════════════════════════════════════════════
     # Mission Lifecycle
@@ -175,7 +222,13 @@ class MissionController:
         # Start specialists
         await self._start_specialists(mission_id)
         
-        # Update status to running
+        # ═══════════════════════════════════════════════════════════
+        # INTEGRATION: Start Management Systems
+        # ═══════════════════════════════════════════════════════════
+        
+        # Start Session Manager for this mission
+        await self.session_manager.start()
+        self.logger.info(f\"SessionManager started for mission {mission_id}\")\n        \n        # Start Stats Manager for real-time metrics\n        await self.stats_manager.start()\n        self.logger.info(\"StatsManager started for real-time monitoring\")\n        \n        # Update mission start metric\n        await self.stats_manager.increment_counter(\n            \"missions_total\",\n            labels={\"status\": \"started\"}\n        )\n        \n        # Update status to running
         await self.blackboard.update_mission_status(mission_id, MissionStatus.RUNNING)
         
         # Update local tracking
@@ -290,6 +343,18 @@ class MissionController:
             
             # Stop specialists (this disconnects their blackboard connections)
             await self._stop_specialists(mission_id)
+            
+            # ═══════════════════════════════════════════════════════════
+            # INTEGRATION: Stop Management Systems
+            # ═══════════════════════════════════════════════════════════
+            
+            # Stop Session Manager
+            await self.session_manager.stop()
+            self.logger.info(f"SessionManager stopped for mission {mission_id}")
+            
+            # Stop Stats Manager
+            await self.stats_manager.stop()
+            self.logger.info("StatsManager stopped")
             
             self.logger.info(f"Mission {mission_id} stopped")
             return True
@@ -1177,7 +1242,13 @@ Available commands the user can use:
             return f"🤖 Received your message: '{user_message}'. Use 'help' to see available commands."
     
     async def shutdown(self) -> None:
-        """Shutdown the controller gracefully."""
+        """
+        ═══════════════════════════════════════════════════════════════
+        INTEGRATION: Graceful Shutdown with All Managers
+        ═══════════════════════════════════════════════════════════════
+        
+        Shutdown the controller gracefully using ShutdownManager.
+        """
         self.logger.info("Shutting down Mission Controller")
         
         self._running = False
@@ -1186,7 +1257,17 @@ Available commands the user can use:
         for mission_id in list(self._active_missions.keys()):
             await self.stop_mission(mission_id)
         
+        # Stop Session Manager
+        await self.session_manager.stop()
+        
+        # Stop Stats Manager
+        await self.stats_manager.stop()
+        
         # Disconnect from Blackboard
         await self.blackboard.disconnect()
         
         self.logger.info("Mission Controller shutdown complete")
+    
+    async def stop(self) -> None:
+        """Alias for shutdown (used by ShutdownManager)."""
+        await self.shutdown()

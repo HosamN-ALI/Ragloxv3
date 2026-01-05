@@ -24,6 +24,7 @@ from ..core.models import (
 )
 from ..core.config import Settings, get_settings
 from ..core.knowledge import EmbeddedKnowledge, get_knowledge
+from ..core.retry_policy import get_retry_manager, RetryPolicy
 
 # Type hints for executor imports (avoid circular imports)
 if TYPE_CHECKING:
@@ -92,8 +93,49 @@ class BaseSpecialist(ABC):
         # Task types this specialist handles
         self._supported_task_types: Set[TaskType] = set()
         
+        # ═══════════════════════════════════════════════════════════
+        # GAP-C04 FIX: Concurrent Task Control
+        # Implement semaphore-based concurrency control to prevent
+        # resource exhaustion from unlimited parallel task execution
+        # ═══════════════════════════════════════════════════════════
+        
+        # Max concurrent tasks per specialist (configurable from settings)
+        self._max_concurrent_tasks = getattr(
+            self.settings,
+            f'{specialist_type.value}_max_concurrent_tasks',
+            5  # Default: 5 concurrent tasks
+        )
+        
+        # Semaphore to control concurrent task execution
+        self._task_semaphore = asyncio.Semaphore(self._max_concurrent_tasks)
+        
+        # Active tasks tracking (for monitoring and graceful shutdown)
+        self._active_tasks: Set[asyncio.Task] = set()
+        self._active_task_ids: Set[str] = set()
+        
+        # Task execution statistics
+        self._task_stats = {
+            "total_tasks_processed": 0,
+            "concurrent_tasks_current": 0,
+            "concurrent_tasks_peak": 0,
+            "tasks_queued_total": 0,
+            "tasks_rejected_total": 0,
+        }
+        
+        self.logger.info(
+            f"{specialist_type.value} initialized with max_concurrent_tasks={self._max_concurrent_tasks}"
+        )
+        
         # Heartbeat interval (seconds)
         self._heartbeat_interval = 30
+        
+        # ═══════════════════════════════════════════════════════════
+        # GAP-C01 FIX: Centralized Retry Policy
+        # Integrate unified retry manager for consistent retry behavior
+        # across all specialists and operation types
+        # ═══════════════════════════════════════════════════════════
+        
+        self._retry_manager = get_retry_manager()
         
         # Execution mode: "real" uses Runner, "simulated" uses mock functions
         self._execution_mode = "real" if runner else "simulated"
@@ -189,7 +231,22 @@ class BaseSpecialist(ABC):
     # ═══════════════════════════════════════════════════════════
     
     async def _task_loop(self) -> None:
-        """Main task processing loop."""
+        """
+        ═══════════════════════════════════════════════════════════════
+        GAP-C04 FIX: Concurrency-Controlled Task Processing Loop
+        ═══════════════════════════════════════════════════════════════
+        
+        Main task processing loop with semaphore-based concurrency control.
+        
+        Flow:
+        1. Claim task from Blackboard
+        2. Acquire semaphore slot (wait if at max concurrency)
+        3. Spawn task in background with semaphore release
+        4. Track active tasks for monitoring
+        5. Update statistics
+        
+        This prevents resource exhaustion by limiting parallel task execution.
+        """
         while self._current_mission_id:
             if not self._running:
                 await asyncio.sleep(1)
@@ -204,14 +261,101 @@ class BaseSpecialist(ABC):
                 )
                 
                 if task_id:
-                    await self._process_task(task_id)
+                    self._task_stats["tasks_queued_total"] += 1
+                    
+                    # ═══════════════════════════════════════════════════════════
+                    # CRITICAL: Spawn task with semaphore control
+                    # This ensures we never exceed max_concurrent_tasks
+                    # ═══════════════════════════════════════════════════════════
+                    
+                    # Try to acquire semaphore (non-blocking check first)
+                    if self._task_semaphore.locked() and len(self._active_tasks) >= self._max_concurrent_tasks:
+                        # At max capacity - this shouldn't happen often due to backpressure
+                        # but log it for monitoring
+                        self.logger.warning(
+                            f"At max concurrent tasks ({self._max_concurrent_tasks}), "
+                            f"waiting for slot..."
+                        )
+                    
+                    # Spawn task in background with concurrency control
+                    task_coro = self._process_task_with_semaphore(task_id)
+                    async_task = asyncio.create_task(task_coro)
+                    
+                    # Track active task
+                    self._active_tasks.add(async_task)
+                    self._active_task_ids.add(task_id)
+                    
+                    # Clean up when done
+                    async_task.add_done_callback(
+                        lambda t: self._on_task_complete(t, task_id)
+                    )
+                    
                 else:
                     # No tasks available, wait briefly
                     await asyncio.sleep(0.5)
                     
             except Exception as e:
-                self.logger.error(f"Error in task loop: {e}")
+                self.logger.error(f"Error in task loop: {e}", exc_info=True)
                 await asyncio.sleep(1)
+    
+    async def _process_task_with_semaphore(self, task_id: str) -> None:
+        """
+        Process a task with semaphore-based concurrency control.
+        
+        This wrapper ensures:
+        1. Task acquires semaphore slot before execution
+        2. Semaphore is released even if task fails
+        3. Concurrent task count is tracked
+        
+        Args:
+            task_id: ID of the task to process
+        """
+        # Acquire semaphore (blocks if at max concurrency)
+        async with self._task_semaphore:
+            # Update statistics
+            concurrent = len(self._active_tasks)
+            self._task_stats["concurrent_tasks_current"] = concurrent
+            if concurrent > self._task_stats["concurrent_tasks_peak"]:
+                self._task_stats["concurrent_tasks_peak"] = concurrent
+            
+            self.logger.debug(
+                f"Task {task_id} acquired execution slot "
+                f"({concurrent}/{self._max_concurrent_tasks} active)"
+            )
+            
+            # Execute the actual task
+            try:
+                await self._process_task(task_id)
+            except Exception as e:
+                self.logger.error(f"Task {task_id} execution failed: {e}", exc_info=True)
+            finally:
+                # Semaphore is automatically released by async with context manager
+                self.logger.debug(f"Task {task_id} released execution slot")
+    
+    def _on_task_complete(self, task: asyncio.Task, task_id: str) -> None:
+        """
+        Callback when a task completes (success or failure).
+        
+        Clean up tracking data structures.
+        
+        Args:
+            task: The asyncio.Task that completed
+            task_id: The task ID
+        """
+        # Remove from active tracking
+        self._active_tasks.discard(task)
+        self._active_task_ids.discard(task_id)
+        
+        # Update statistics
+        self._task_stats["total_tasks_processed"] += 1
+        self._task_stats["concurrent_tasks_current"] = len(self._active_tasks)
+        
+        # Log any uncaught exception
+        if task.exception():
+            self.logger.error(
+                f"Task {task_id} raised uncaught exception: {task.exception()}",
+                exc_info=task.exception()
+            )
     
     async def _event_loop(self) -> None:
         """Pub/Sub event processing loop."""
@@ -246,7 +390,18 @@ class BaseSpecialist(ABC):
     
     async def _process_task(self, task_id: str) -> None:
         """
-        Process a claimed task.
+        ═══════════════════════════════════════════════════════════════
+        GAP-C01 FIX: Process task with centralized retry policy
+        ═══════════════════════════════════════════════════════════════
+        
+        Process a claimed task with intelligent retry logic.
+        
+        Flow:
+        1. Get task details from Blackboard
+        2. Determine appropriate retry policy based on task type
+        3. Execute task with retry wrapper
+        4. Handle success/failure with proper retry coordination
+        5. Log results and error contexts for Reflexion
         
         Args:
             task_id: ID of the task to process
@@ -261,8 +416,23 @@ class BaseSpecialist(ABC):
                 self.logger.warning(f"Task {task_id} not found")
                 return
             
-            # Execute the task
-            result_data = await self.execute_task(task)
+            # Determine retry policy based on task type
+            task_type = task.get("type", "")
+            retry_policy_name = self._get_retry_policy_for_task(task_type, task)
+            
+            # Execute task with retry policy
+            result_data = await self._retry_manager.execute_with_retry(
+                func=self.execute_task,
+                args=(task,),
+                kwargs={},
+                policy_name=retry_policy_name,
+                context={
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "mission_id": self._current_mission_id,
+                    "worker_id": self.worker_id
+                }
+            )
             
             # Mark task as completed
             await self.blackboard.complete_task(
@@ -280,21 +450,97 @@ class BaseSpecialist(ABC):
                     "task_id": task_id,
                     "task_type": task.get("type"),
                     "worker_id": self.worker_id,
-                    "result": result_data
+                    "result": result_data,
+                    "retry_policy_used": retry_policy_name
                 }
             )
             
-            self.logger.info(f"Task {task_id} completed successfully")
+            self.logger.info(f"Task {task_id} completed successfully with policy {retry_policy_name}")
             
         except Exception as e:
-            self.logger.error(f"Task {task_id} failed: {e}")
+            self.logger.error(f"Task {task_id} failed after retries: {e}")
+            
+            # Extract error context for Reflexion analysis
+            error_context = self._extract_error_context(e, task)
             
             # Mark task as failed
             await self.blackboard.fail_task(
                 self._current_mission_id,
                 task_id,
-                str(e)
+                str(e),
+                error_context=error_context
             )
+            
+            # Log error for analysis
+            await self.blackboard.log_result(
+                self._current_mission_id,
+                "task_failed",
+                {
+                    "task_id": task_id,
+                    "task_type": task.get("type"),
+                    "worker_id": self.worker_id,
+                    "error": str(e),
+                    "error_context": error_context
+                }
+            )
+    
+    def _get_retry_policy_for_task(self, task_type: str, task: Dict[str, Any]) -> str:
+        """
+        Determine appropriate retry policy based on task type and context.
+        
+        Args:
+            task_type: Type of task
+            task: Full task dictionary
+            
+        Returns:
+            Retry policy name
+        """
+        # Map task types to retry policies
+        task_type_lower = task_type.lower()
+        
+        if "network" in task_type_lower or "scan" in task_type_lower:
+            return "network_operation"
+        elif "exploit" in task_type_lower or "attack" in task_type_lower:
+            return "vulnerability_operation"
+        elif "auth" in task_type_lower or "cred" in task_type_lower:
+            return "authentication_operation"
+        elif "llm" in task_type_lower or "analysis" in task_type_lower:
+            return "llm_api"
+        else:
+            return "default"
+    
+    def _extract_error_context(self, exception: Exception, task: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract error context for Reflexion analysis.
+        
+        Args:
+            exception: Exception that occurred
+            task: Task that failed
+            
+        Returns:
+            Error context dictionary
+        """
+        error_str = str(exception).lower()
+        
+        # Categorize error
+        if any(kw in error_str for kw in ["connection", "timeout", "network", "unreachable"]):
+            category = "network"
+        elif any(kw in error_str for kw in ["firewall", "waf", "blocked", "ids", "edr"]):
+            category = "defense"
+        elif any(kw in error_str for kw in ["auth", "permission", "denied", "forbidden"]):
+            category = "authentication"
+        elif any(kw in error_str for kw in ["patched", "not vulnerable", "failed to exploit"]):
+            category = "vulnerability"
+        else:
+            category = "technical"
+        
+        return {
+            "category": category,
+            "error_message": str(exception),
+            "task_type": task.get("type"),
+            "task_params": task.get("params", {}),
+            "timestamp": datetime.now().isoformat()
+        }
     
     # ═══════════════════════════════════════════════════════════
     # Pub/Sub
@@ -621,6 +867,29 @@ class BaseSpecialist(ABC):
         
         session_id = await self.blackboard.add_session(session)
         
+        # ═══════════════════════════════════════════════════════════
+        # INTEGRATION: Register session with SessionManager
+        # ═══════════════════════════════════════════════════════════
+        from ..core.session_manager import get_session_manager
+        
+        try:
+            session_manager = get_session_manager(
+                blackboard=self.blackboard,
+                settings=self.settings
+            )
+            await session_manager.register_session(
+                session_id=session_id,
+                target_id=target_id,
+                session_type=SessionType(session_type)
+            )
+            self.logger.debug(
+                f"Session {session_id} registered with SessionManager"
+            )
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to register session with SessionManager: {e}"
+            )
+        
         # Publish event
         needs_privesc = privilege in (PrivilegeLevel.USER, PrivilegeLevel.UNKNOWN)
         event = NewSessionEvent(
@@ -930,6 +1199,34 @@ class BaseSpecialist(ABC):
             self.logger.info(f"Executing RX module {rx_module_id} on {target_host}")
             result = await self.runner.execute_module(request)
             
+            # ═══════════════════════════════════════════════════════════
+            # INTEGRATION: Send heartbeat after command execution
+            # ═══════════════════════════════════════════════════════════
+            # If this is session-based execution, send heartbeat
+            if connection_config and hasattr(connection_config, 'session_id'):
+                try:
+                    from ..core.session_manager import get_session_manager
+                    session_manager = get_session_manager(
+                        blackboard=self.blackboard,
+                        settings=self.settings
+                    )
+                    session_id = connection_config.session_id
+                    await session_manager.heartbeat(
+                        session_id=session_id,
+                        activity=True  # This is actual activity (command execution)
+                    )
+                    await session_manager.record_command_execution(
+                        session_id=session_id,
+                        success=result.success
+                    )
+                    self.logger.debug(
+                        f"Heartbeat sent for session {session_id}"
+                    )
+                except Exception as e:
+                    self.logger.debug(
+                        f"Failed to send heartbeat: {e}"
+                    )
+            
             # Build response
             response = {
                 "success": result.success,
@@ -1111,3 +1408,28 @@ class BaseSpecialist(ABC):
                 self.logger.debug("Cleaned up dead connections")
             except Exception as e:
                 self.logger.warning(f"Error cleaning up connections: {e}")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get specialist statistics including task semaphore metrics.
+        
+        Returns:
+            Dict with stats including task_semaphore_active, task_semaphore_available
+        """
+        stats = {
+            "worker_id": self.worker_id,
+            "specialist_type": self.specialist_type,
+            "is_running": self._running,
+            "current_mission_id": self._current_mission_id,
+            "task_semaphore_active": 0,
+            "task_semaphore_available": 0,
+            "task_semaphore_limit": 0
+        }
+        
+        if hasattr(self, '_task_semaphore') and self._task_semaphore:
+            # Semaphore._value is internal but safe to read
+            stats["task_semaphore_available"] = self._task_semaphore._value
+            stats["task_semaphore_limit"] = getattr(self, '_max_concurrent_tasks', 0)
+            stats["task_semaphore_active"] = stats["task_semaphore_limit"] - stats["task_semaphore_available"]
+        
+        return stats

@@ -1,0 +1,268 @@
+{
+  "reconnaissance:T1046:Windows Server 2019:fw=False": {
+    "pattern_id": "reconnaissance:T1046:Windows Server 2019:fw=False",
+    "operation_type": "reconnaissance",
+    "technique_id": "T1046",
+    "target_characteristics": {
+      "os": "Windows Server 2019",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "scan_type": "full",
+      "service_detection": 1.0
+    },
+    "success_count": 5,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 5000,
+    "last_used": 1767600153.9541707,
+    "confidence": 0.5
+  },
+  "persistence:T1547:Windows:fw=False": {
+    "pattern_id": "persistence:T1547:Windows:fw=False",
+    "operation_type": "persistence",
+    "technique_id": "T1547",
+    "target_characteristics": {
+      "os": "Windows",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "key": "run",
+      "hive": "HKLM"
+    },
+    "success_count": 5,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 500,
+    "last_used": 1767600153.9621608,
+    "confidence": 0.5
+  },
+  "exploit:none:Windows:fw=False": {
+    "pattern_id": "exploit:none:Windows:fw=False",
+    "operation_type": "exploit",
+    "technique_id": null,
+    "target_characteristics": {
+      "os": "Windows",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "method": "primary"
+    },
+    "success_count": 5,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 1000,
+    "last_used": 1767600153.9660745,
+    "confidence": 0.5
+  },
+  "credential_harvest:none:Windows:fw=False": {
+    "pattern_id": "credential_harvest:none:Windows:fw=False",
+    "operation_type": "credential_harvest",
+    "technique_id": null,
+    "target_characteristics": {
+      "os": "Windows",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "method": "primary"
+    },
+    "success_count": 5,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 1000,
+    "last_used": 1767600153.9669173,
+    "confidence": 0.5
+  },
+  "data_exfiltration:none:Windows:fw=False": {
+    "pattern_id": "data_exfiltration:none:Windows:fw=False",
+    "operation_type": "data_exfiltration",
+    "technique_id": null,
+    "target_characteristics": {
+      "os": "Windows",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "method": "primary"
+    },
+    "success_count": 5,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 1000,
+    "last_used": 1767600153.9690468,
+    "confidence": 0.5
+  },
+  "exploit:T1210:Windows Server 2019:fw=False": {
+    "pattern_id": "exploit:T1210:Windows Server 2019:fw=False",
+    "operation_type": "exploit",
+    "technique_id": "T1210",
+    "target_characteristics": {
+      "os": "Windows Server 2019",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "exploit": "SMBGhost",
+      "evasion": 1.0
+    },
+    "success_count": 2,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 3000,
+    "last_used": 1767600153.9553585,
+    "confidence": 0.5
+  },
+  "lateral_movement:T1021:unknown:fw=False": {
+    "pattern_id": "lateral_movement:T1021:unknown:fw=False",
+    "operation_type": "lateral_movement",
+    "technique_id": "T1021",
+    "target_characteristics": {
+      "os": "unknown",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "credential": "administrator",
+      "method": "psexec"
+    },
+    "success_count": 6,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 2000,
+    "last_used": 1767600153.960444,
+    "confidence": 0.5
+  },
+  "domain_compromise:T1003:unknown:fw=False": {
+    "pattern_id": "domain_compromise:T1003:unknown:fw=False",
+    "operation_type": "domain_compromise",
+    "technique_id": "T1003",
+    "target_characteristics": {
+      "os": "unknown",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "method": "dcsync",
+      "credential": "administrator"
+    },
+    "success_count": 2,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 4000,
+    "last_used": 1767600153.9612718,
+    "confidence": 0.5
+  },
+  "data_exfiltration:T1041:unknown:fw=False": {
+    "pattern_id": "data_exfiltration:T1041:unknown:fw=False",
+    "operation_type": "data_exfiltration",
+    "technique_id": "T1041",
+    "target_characteristics": {
+      "os": "unknown",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "methods": [
+        "dns",
+        "https",
+        "smb",
+        "cloud"
+      ]
+    },
+    "success_count": 2,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 0,
+    "last_used": 1767600153.9652135,
+    "confidence": 0.5
+  },
+  "cloud_enumeration:T1580:unknown:fw=False": {
+    "pattern_id": "cloud_enumeration:T1580:unknown:fw=False",
+    "operation_type": "cloud_enumeration",
+    "technique_id": "T1580",
+    "target_characteristics": {
+      "os": "unknown",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "scan_type": "public_buckets"
+    },
+    "success_count": 1,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 5000,
+    "last_used": 1767600263.5087657,
+    "confidence": 0.5
+  },
+  "cloud_data_access:T1530:unknown:fw=False": {
+    "pattern_id": "cloud_data_access:T1530:unknown:fw=False",
+    "operation_type": "cloud_data_access",
+    "technique_id": "T1530",
+    "target_characteristics": {
+      "os": "unknown",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "buckets": [
+        "company-backups",
+        "prod-logs",
+        "dev-artifacts"
+      ]
+    },
+    "success_count": 2,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 27500,
+    "last_used": 1767600263.513629,
+    "confidence": 0.5
+  },
+  "cloud_privilege_escalation:T1548:unknown:fw=False": {
+    "pattern_id": "cloud_privilege_escalation:T1548:unknown:fw=False",
+    "operation_type": "cloud_privilege_escalation",
+    "technique_id": "T1548",
+    "target_characteristics": {
+      "os": "unknown",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "optimal_parameters": {
+      "method": "rbac_misconfiguration"
+    },
+    "success_count": 1,
+    "avg_success_rate": 1.0,
+    "avg_duration_ms": 15000,
+    "last_used": 1767600263.5127337,
+    "confidence": 0.5
+  }
+}

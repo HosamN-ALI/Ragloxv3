@@ -1,0 +1,19 @@
+{
+  "lateral_movement:none:Windows:fw=False": {
+    "pattern_id": "lateral_movement:none:Windows:fw=False",
+    "operation_type": "lateral_movement",
+    "technique_id": null,
+    "failure_indicators": [],
+    "context": {
+      "os": "Windows",
+      "os_version": null,
+      "services": [],
+      "has_firewall": false,
+      "has_ids": false,
+      "has_av": false
+    },
+    "failure_count": 5,
+    "last_occurrence": 1767600153.9682167,
+    "recommended_alternatives": []
+  }
+}

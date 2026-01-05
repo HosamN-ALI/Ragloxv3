@@ -4,6 +4,7 @@
 # ═══════════════════════════════════════════════════════════════
 
 import logging
+import signal
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -23,11 +24,17 @@ from .routes import router
 from .websocket import websocket_router
 from .knowledge_routes import router as knowledge_router
 
+# ═══════════════════════════════════════════════════════════════
+# INTEGRATION: Shutdown Manager
+# ═══════════════════════════════════════════════════════════════
+from ..core.shutdown_manager import ShutdownManager, get_shutdown_manager
+
 
 # Global instances
 blackboard: Blackboard = None
 controller: MissionController = None
 knowledge: EmbeddedKnowledge = None
+shutdown_manager: ShutdownManager = None
 
 
 def init_llm_service(settings) -> None:
@@ -96,9 +103,15 @@ def init_llm_service(settings) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Application lifespan manager."""
-    global blackboard, controller, knowledge
+    global blackboard, controller, knowledge, shutdown_manager
     
     settings = get_settings()
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize Shutdown Manager
+    # ═══════════════════════════════════════════════════════════════
+    shutdown_manager = get_shutdown_manager()
+    logger.info("🛡️ Shutdown Manager initialized")
     
     # Initialize Knowledge Base (in-memory, fast)
     knowledge = init_knowledge(data_path=settings.knowledge_data_path)
@@ -123,18 +136,57 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Initialize Controller
     controller = MissionController(blackboard=blackboard, settings=settings)
     
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Register components with Shutdown Manager
+    # ═══════════════════════════════════════════════════════════════
+    # Note: MissionController already registers itself in __init__
+    
+    # Register Blackboard for graceful disconnection
+    shutdown_manager.register_component(
+        name="blackboard",
+        component=blackboard,
+        priority=50,  # After controller
+        shutdown_timeout=30.0,
+        shutdown_method="disconnect"
+    )
+    
     # Store in app state
     app.state.blackboard = blackboard
     app.state.controller = controller
+    app.state.shutdown_manager = shutdown_manager
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Setup signal handlers for graceful shutdown
+    # ═══════════════════════════════════════════════════════════════
+    def signal_handler(signum, frame):
+        """Handle shutdown signals."""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        shutdown_manager.shutdown(signum, frame)
+    
+    # Register signal handlers
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
     
     print("🚀 RAGLOX v3.0 API started")
+    print("🛡️ Graceful shutdown enabled (SIGTERM/SIGINT)")
     
     yield
     
-    # Cleanup
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Graceful Shutdown
+    # ═══════════════════════════════════════════════════════════════
     print("🛑 Shutting down RAGLOX...")
-    await controller.shutdown()
-    await blackboard.disconnect()
+    
+    # Use ShutdownManager for coordinated shutdown
+    if shutdown_manager:
+        logger.info("Initiating graceful shutdown via ShutdownManager...")
+        await shutdown_manager.shutdown_async()
+    else:
+        # Fallback to manual shutdown
+        logger.warning("ShutdownManager not available, using fallback shutdown")
+        await controller.shutdown()
+        await blackboard.disconnect()
+    
     print("✓ RAGLOX shutdown complete")
 
 

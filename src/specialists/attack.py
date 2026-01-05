@@ -32,6 +32,13 @@ from ..core.operational_memory import (
     DecisionOutcome,
     OperationalContext,
 )
+from ..core.intelligence_decision_engine import (
+    IntelligenceDecisionEngine,
+    DecisionContext,
+    Decision,
+    DecisionType,
+    DecisionReason,
+)
 
 if TYPE_CHECKING:
     from ..executors import RXModuleRunner, ExecutorFactory
@@ -164,6 +171,19 @@ class AttackSpecialist(BaseSpecialist):
             logger=self.logger
         )
         
+        # ═══════════════════════════════════════════════════════════
+        # GAP-C03 FIX: Intelligence Decision Engine
+        # Advanced decision-making engine that integrates ALL intelligence
+        # layers to make informed, risk-aware exploitation decisions
+        # ═══════════════════════════════════════════════════════════
+        self._decision_engine = IntelligenceDecisionEngine(
+            strategic_scorer=self._strategic_scorer,
+            operational_memory=self._operational_memory,
+            defense_intelligence=None,  # Will be added when DefenseIntelligence is available
+            blackboard=blackboard,
+            logger=self.logger
+        )
+        
         # Statistics
         self._stats = {
             "exploits_attempted": 0,
@@ -171,17 +191,26 @@ class AttackSpecialist(BaseSpecialist):
             "strategic_scoring_used": 0,
             "memory_guided_attacks": 0,
             "dynamic_success_rate_lookups": 0,
+            "intelligence_decisions_made": 0,
+            "intelligence_decisions_execute": 0,
+            "intelligence_decisions_skip": 0,
+            "intelligence_decisions_approval": 0,
         }
         
         # NOTE: Static exploit success rates have been REMOVED
         # Exploit selection and success estimation is now dynamic via:
-        # 1. StrategicScorer (replaces random.random())
-        # 2. OperationalMemory (historical success patterns)
-        # 3. Knowledge Base (get_module_for_vuln, get_exploit_reliability)
-        # 4. LLM Context (AnalysisSpecialist recommendations)
+        # 1. IntelligenceDecisionEngine (NEW - integrates all layers)
+        # 2. StrategicScorer (vulnerability assessment)
+        # 3. OperationalMemory (historical success patterns)
+        # 4. Knowledge Base (get_module_for_vuln, get_exploit_reliability)
+        # 5. DefenseIntelligence (defense detection and evasion)
+        # 6. LLM Context (AnalysisSpecialist recommendations)
         # This ensures adaptive, intelligence-driven decisions
         
-        self.logger.info("AttackSpecialist initialized with Strategic Scorer integration")
+        self.logger.info(
+            "AttackSpecialist initialized with Intelligence Decision Engine "
+            "(Strategic Scorer + Operational Memory + Decision Gates)"
+        )
         
         # Privilege escalation techniques (metadata only, success determined dynamically)
         self._privesc_techniques = [
@@ -255,11 +284,30 @@ class AttackSpecialist(BaseSpecialist):
     
     async def _execute_exploit(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Exploit a vulnerability to gain access.
+        ═══════════════════════════════════════════════════════════════
+        GAP-C03 FIX: Intelligence-Driven Exploit Execution
+        ═══════════════════════════════════════════════════════════════
         
-        Uses RXModuleRunner for real execution or falls back to simulation.
+        Exploit a vulnerability using INTELLIGENCE-DRIVEN decision-making.
         
-        Intel Integration:
+        This method now integrates the Intelligence Decision Engine to make
+        informed, risk-aware decisions about exploitation operations.
+        
+        Decision Flow:
+        1. Gather context (target, vuln, mission state)
+        2. Query Intelligence Decision Engine
+        3. Apply decision gates (risk assessment, historical patterns, defenses)
+        4. Execute ONLY if decision is EXECUTE
+        5. Skip, defer, or request approval based on intelligence
+        
+        Intelligence Sources Integrated:
+        - Strategic Scorer: Vulnerability assessment & success probability
+        - Operational Memory: Historical operation patterns
+        - Defense Intelligence: Defense detection & evasion
+        - Knowledge Base: Module reliability & exploit metadata
+        - Mission Context: Goals, stealth level, constraints
+        
+        Intel Credential Integration:
         - Checks for available intel credentials before exploitation
         - Prioritizes high-reliability credentials over brute force
         - Uses cred_id from task if provided by IntelSpecialist
@@ -268,6 +316,7 @@ class AttackSpecialist(BaseSpecialist):
         target_id = task.get("target_id")
         rx_module = task.get("rx_module")
         task_id = task.get("id")
+        mission_id = task.get("mission_id", "")
         
         # Check for intel credential
         intel_cred_id = task.get("cred_id")
@@ -302,6 +351,7 @@ class AttackSpecialist(BaseSpecialist):
         target = None
         target_ip = None
         target_platform = "linux"  # Default
+        target_os = None
         
         if target_id:
             clean_target_id = target_id.replace("target:", "") if isinstance(target_id, str) else str(target_id)
@@ -332,7 +382,159 @@ class AttackSpecialist(BaseSpecialist):
         if not target_id:
             target_id = vuln.get("target_id")
         
-        self.logger.info(f"Exploiting {vuln_type} on target {target_id}")
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 1: Build Decision Context
+        # Gather all relevant information for intelligence-driven decision
+        # ═══════════════════════════════════════════════════════════════
+        
+        # Get mission context
+        mission_goals = []
+        stealth_level = "normal"
+        if mission_id and self.blackboard:
+            try:
+                mission_data = await self.blackboard.get_mission(mission_id)
+                if mission_data:
+                    mission_goals = list(mission_data.get("goals", {}).keys())
+                    # Infer stealth level from constraints or goals
+                    constraints = mission_data.get("constraints", [])
+                    if any("stealth" in str(c).lower() for c in constraints):
+                        stealth_level = "high"
+            except Exception as e:
+                self.logger.warning(f"Failed to get mission context: {e}")
+        
+        # Get available credentials
+        available_credentials = []
+        if self.blackboard and mission_id and target_id:
+            try:
+                creds = await self.blackboard.get_target_credentials(mission_id, target_id)
+                available_credentials = [c.get("cred_id") for c in (creds or [])]
+            except Exception as e:
+                self.logger.debug(f"Failed to get credentials: {e}")
+        
+        # Build decision context
+        decision_context = DecisionContext(
+            operation_type="exploit",
+            target_id=target_id,
+            vuln_id=vuln_id,
+            technique_id=vuln_type,
+            target_os=target_os,
+            target_ip=target_ip,
+            target_services=target.get("services", []) if target else [],
+            target_criticality=self._infer_target_criticality(target),
+            mission_id=mission_id,
+            mission_goals=mission_goals,
+            stealth_level=stealth_level,
+            available_credentials=available_credentials
+        )
+        
+        self.logger.info(
+            f"[INTELLIGENCE] Consulting Decision Engine for exploit: "
+            f"vuln={vuln_type}, target={target_id}, stealth={stealth_level}"
+        )
+        
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 2: Consult Intelligence Decision Engine
+        # Let the engine make an informed decision based on all intelligence
+        # ═══════════════════════════════════════════════════════════════
+        
+        decision = await self._decision_engine.make_decision(decision_context)
+        self._stats["intelligence_decisions_made"] += 1
+        
+        # Log decision details
+        self.logger.info(
+            f"[INTELLIGENCE DECISION] Type: {decision.decision_type.value}, "
+            f"Confidence: {decision.confidence:.2%}, "
+            f"Reason: {decision.primary_reason.value}"
+        )
+        for reason in decision.reasoning:
+            self.logger.info(f"[INTELLIGENCE DECISION]   - {reason}")
+        
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 3: Execute Decision
+        # Act based on the intelligence-driven decision
+        # ═══════════════════════════════════════════════════════════════
+        
+        # Decision: SKIP - Don't execute this exploit
+        if decision.decision_type == DecisionType.SKIP:
+            self._stats["intelligence_decisions_skip"] += 1
+            self.logger.warning(
+                f"[INTELLIGENCE] SKIPPING exploit on {target_id}: {decision.primary_reason.value}"
+            )
+            return {
+                "success": False,
+                "vuln_type": vuln_type,
+                "reason": f"Intelligence Decision: {decision.primary_reason.value}",
+                "decision": decision.to_dict(),
+                "execution_mode": "skipped_by_intelligence"
+            }
+        
+        # Decision: REQUEST_APPROVAL - Ask human operator
+        elif decision.decision_type == DecisionType.REQUEST_APPROVAL:
+            self._stats["intelligence_decisions_approval"] += 1
+            self.logger.warning(
+                f"[INTELLIGENCE] Exploit on {target_id} requires HUMAN APPROVAL: "
+                f"{decision.primary_reason.value}"
+            )
+            # TODO: Implement HITL approval workflow (GAP-H04)
+            # For now, defer execution
+            return {
+                "success": False,
+                "vuln_type": vuln_type,
+                "reason": f"Awaiting approval: {decision.primary_reason.value}",
+                "requires_approval": True,
+                "decision": decision.to_dict(),
+                "execution_mode": "awaiting_approval"
+            }
+        
+        # Decision: USE_ALTERNATIVE - Try different approach
+        elif decision.decision_type == DecisionType.USE_ALTERNATIVE:
+            self.logger.info(
+                f"[INTELLIGENCE] Using alternative approach for {target_id}: "
+                f"{decision.primary_reason.value}"
+            )
+            
+            # If alternative is credential-based and we have creds, use them
+            if (decision.recommended_action and
+                decision.recommended_action.get("method") == "credential_based" and
+                available_credentials):
+                cred_id = decision.recommended_action.get("credential_id") or available_credentials[0]
+                self.logger.info(f"[INTELLIGENCE] Switching to credential-based approach with cred {cred_id}")
+                return await self._execute_exploit_with_intel_cred(
+                    task=task,
+                    cred_id=cred_id
+                )
+            
+            # Otherwise, proceed with evasion-enhanced exploit
+            self.logger.info("[INTELLIGENCE] Proceeding with evasion-enhanced approach")
+            # Fall through to EXECUTE with evasion
+        
+        # Decision: DEFER - Postpone execution
+        elif decision.decision_type == DecisionType.DEFER:
+            self.logger.info(
+                f"[INTELLIGENCE] Deferring exploit on {target_id}: {decision.primary_reason.value}"
+            )
+            return {
+                "success": False,
+                "vuln_type": vuln_type,
+                "reason": f"Deferred: {decision.primary_reason.value}",
+                "defer_until": decision.defer_until.isoformat() if decision.defer_until else None,
+                "decision": decision.to_dict(),
+                "execution_mode": "deferred"
+            }
+        
+        # Decision: EXECUTE - Proceed with exploitation
+        # (This includes USE_ALTERNATIVE with evasion)
+        self._stats["intelligence_decisions_execute"] += 1
+        
+        self.logger.info(
+            f"[INTELLIGENCE] EXECUTING exploit on {target_id} "
+            f"(confidence: {decision.confidence:.2%})"
+        )
+        
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 4: Execute Exploit (Intelligence-Guided)
+        # Use the recommended strategy from the decision
+        # ═══════════════════════════════════════════════════════════════
         
         # Try to find RX module from knowledge base if not provided
         rx_module_info = None
@@ -362,8 +564,17 @@ class AttackSpecialist(BaseSpecialist):
             if task_id:
                 await self.log_execution_to_blackboard(task_id, exec_result)
         else:
-            # Simulate exploit attempt
-            success = await self._simulate_exploit(vuln_type, rx_module_info)
+            # Simulate exploit attempt (intelligence-guided)
+            success = await self._simulate_exploit_intelligence_driven(
+                vuln_type=vuln_type,
+                rx_module_info=rx_module_info,
+                decision=decision,
+                target_info=target
+            )
+        
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 5: Post-Exploitation (if successful)
+        # ═══════════════════════════════════════════════════════════════
         
         if success:
             # Determine session type based on exploit
@@ -407,22 +618,123 @@ class AttackSpecialist(BaseSpecialist):
                     session_id=session_id
                 )
             
+            self.logger.info(
+                f"[INTELLIGENCE] ✅ Exploit SUCCEEDED on {target_id} "
+                f"(session: {session_id}, privilege: {initial_privilege.value})"
+            )
+            
             return {
                 "success": True,
                 "vuln_type": vuln_type,
                 "session_id": session_id,
                 "privilege": initial_privilege.value,
                 "session_type": session_type,
-                "execution_mode": execution_mode
+                "execution_mode": execution_mode,
+                "decision": decision.to_dict(),
+                "intelligence_confidence": decision.confidence
             }
         else:
+            self.logger.warning(
+                f"[INTELLIGENCE] ❌ Exploit FAILED on {target_id} "
+                f"(despite {decision.confidence:.2%} confidence)"
+            )
+            
             return {
                 "success": False,
                 "vuln_type": vuln_type,
                 "reason": "Exploit failed",
                 "error_context": error_context,
-                "execution_mode": execution_mode
+                "execution_mode": execution_mode,
+                "decision": decision.to_dict(),
+                "intelligence_confidence": decision.confidence,
+                "fallback_options": decision.alternative_options
             }
+    
+    def _infer_target_criticality(self, target: Optional[Dict[str, Any]]) -> str:
+        """
+        Infer target criticality from available information
+        
+        Args:
+            target: Target dictionary
+            
+        Returns:
+            Criticality level: "low", "medium", "high", "critical"
+        """
+        if not target:
+            return "medium"
+        
+        # Check for high-value indicators
+        services = target.get("services", [])
+        os = (target.get("os") or "").lower()
+        
+        # Domain controllers are critical
+        if "domain controller" in os or any("kerberos" in str(s).lower() for s in services):
+            return "critical"
+        
+        # Database servers are high
+        if any(db in str(services).lower() for db in ["mysql", "postgres", "mssql", "oracle", "mongodb"]):
+            return "high"
+        
+        # Admin services are high
+        if any(admin in str(services).lower() for admin in ["rdp", "ssh", "winrm"]):
+            return "high"
+        
+        # Default medium
+        return "medium"
+    
+    async def _simulate_exploit_intelligence_driven(
+        self,
+        vuln_type: str,
+        rx_module_info: Optional[Dict[str, Any]],
+        decision: Decision,
+        target_info: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Simulate exploit attempt using INTELLIGENCE-DRIVEN success estimation
+        
+        Uses the confidence from the Intelligence Decision Engine instead
+        of random probability. This ensures consistency between decision-making
+        and execution.
+        
+        Args:
+            vuln_type: Vulnerability type
+            rx_module_info: RX Module metadata
+            decision: Intelligence decision with confidence score
+            target_info: Target information
+            
+        Returns:
+            True if exploit succeeds, False otherwise
+        """
+        self._stats["exploits_attempted"] += 1
+        
+        # Use decision confidence as success threshold
+        success_threshold = decision.confidence
+        
+        self.logger.debug(
+            f"[INTELLIGENCE SIMULATION] Exploit simulation: "
+            f"vuln={vuln_type}, confidence={success_threshold:.2%}"
+        )
+        
+        # Simulate execution time
+        await asyncio.sleep(0.5)
+        
+        # Use the decision confidence as the success probability
+        roll = self._get_success_roll()
+        success = roll < success_threshold
+        
+        if success:
+            self._stats["exploits_succeeded"] += 1
+            self.logger.info(
+                f"[INTELLIGENCE SIMULATION] ✅ Exploit succeeded "
+                f"(roll={roll:.2f} < confidence={success_threshold:.2f})"
+            )
+        else:
+            self.logger.info(
+                f"[INTELLIGENCE SIMULATION] ❌ Exploit failed "
+                f"(roll={roll:.2f} >= confidence={success_threshold:.2f})"
+            )
+        
+        return success
     
     async def _real_exploit(
         self,
