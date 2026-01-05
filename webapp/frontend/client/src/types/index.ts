@@ -426,7 +426,8 @@ export enum UserRole {
 export interface User {
   id: string;
   username: string;
-  email: string;
+  email?: string;
+  displayName?: string;
   role: UserRole;
   created_at: string;
   last_login?: string;
