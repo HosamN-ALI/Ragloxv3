@@ -287,6 +287,9 @@ export default function Operations() {
   }, [missionId, loadAllData, loadStatistics]);
 
   // Handle sending messages with enhanced error handling
+  // Architecture: Hybrid approach for Red Team Operations
+  // - HTTP POST: Send message & get immediate response (fallback)
+  // - WebSocket: Receive real-time AI responses (primary)
   const handleSendMessage = useCallback(async (content: string) => {
     // Add user message to local state immediately (optimistic update)
     const userMessage: ChatMessage = {
@@ -301,20 +304,34 @@ export default function Operations() {
     try {
       const response = await chatApi.send(missionId, content);
 
-      // Add AI response to chat
-      setChatMessages((prev) => [...prev, response]);
+      // Handle response based on role:
+      // - "system": AI response received via HTTP (fallback when WebSocket unavailable)
+      // - "user": Just acknowledgment, WebSocket will deliver AI response
+      if (response.role === "system") {
+        // Check if this message already exists (from WebSocket)
+        setChatMessages((prev) => {
+          const exists = prev.some(m => m.id === response.id);
+          if (exists) {
+            // WebSocket already delivered this message
+            return prev;
+          }
+          // Add AI response (HTTP fallback)
+          return [...prev, response];
+        });
 
-      // Add to events for activity feed
-      addEvent({
-        id: `event-${Date.now()}`,
-        type: "chat_message",
-        title: "Message from assistant",
-        description: response.content,
-        timestamp: response.timestamp,
-        status: "completed",
-        data: response,
-        expanded: false,
-      });
+        // Add to events for activity feed (only if not duplicate)
+        addEvent({
+          id: `event-${Date.now()}`,
+          type: "chat_message",
+          title: "Message from assistant",
+          description: response.content,
+          timestamp: response.timestamp,
+          status: "completed",
+          data: response,
+          expanded: false,
+        });
+      }
+      // If response.role === "user", just acknowledge - WebSocket handles AI response
     } catch (error) {
       console.error("[Operations] Failed to send message:", error);
 

@@ -340,6 +340,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     app.state.shutdown_manager = shutdown_manager
     
     # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize Workflow Orchestrator
+    # ═══════════════════════════════════════════════════════════════
+    try:
+        from ..core.workflow_orchestrator import AgentWorkflowOrchestrator
+        logger.info("🔄 Initializing Workflow Orchestrator...")
+        
+        # Create orchestrator with CONNECTED blackboard
+        workflow_orchestrator = AgentWorkflowOrchestrator(
+            blackboard=blackboard,  # Already connected
+            settings=settings,
+            knowledge=knowledge
+        )
+        
+        app.state.workflow_orchestrator = workflow_orchestrator
+        logger.info("✅ Workflow Orchestrator initialized with connected Blackboard")
+    except Exception as e:
+        logger.error(f"❌ Workflow Orchestrator initialization failed: {e}")
+        app.state.workflow_orchestrator = None
+    
+    # ═══════════════════════════════════════════════════════════════
     # INTEGRATION: Setup signal handlers for graceful shutdown
     # ═══════════════════════════════════════════════════════════════
     def signal_handler(signum, frame):

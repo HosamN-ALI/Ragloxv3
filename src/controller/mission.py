@@ -1303,7 +1303,7 @@ class MissionController:
             except Exception as e:
                 self.logger.warning(f"Failed to persist response to Redis: {e}")
             
-            # Publish response event
+            # Publish response event via Blackboard Pub/Sub
             response_event = ChatEvent(
                 mission_id=UUID(mission_id),
                 message_id=response.id,
@@ -1316,8 +1316,27 @@ class MissionController:
                 await self.blackboard.publish(channel, response_event)
             else:
                 await self.blackboard.publish_dict(channel, response_event.model_dump())
+            
+            # REAL-TIME: Broadcast AI response via WebSocket for instant delivery
+            # This ensures the frontend receives the response immediately
+            # Use lazy import to avoid circular dependency
+            try:
+                from ..api.websocket import broadcast_chat_message
+                await broadcast_chat_message(
+                    mission_id=mission_id,
+                    message_id=str(response.id),
+                    role=response.role,
+                    content=response.content,
+                    related_task_id=str(response.related_task_id) if response.related_task_id else None,
+                    related_action_id=str(response.related_action_id) if response.related_action_id else None
+                )
+                self.logger.info(f"📡 Chat response broadcast via WebSocket for mission {mission_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to broadcast chat message via WebSocket: {e}")
         
-        return message
+        # Return AI response if available, otherwise return user message
+        # HTTP response serves as fallback when WebSocket is not available
+        return response if response else message
     
     async def get_chat_history(self, mission_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
