@@ -1,0 +1,424 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# RAGLOX v3.0 - Production Docker Compose
+# Enterprise AI-Powered Penetration Testing Platform
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   Development:  docker-compose --profile dev up -d
+#   Production:   docker-compose up -d
+#   With Testing: docker-compose --profile testing up -d
+#   Full Stack:   docker-compose --profile dev --profile testing up -d
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # RAGLOX API - Main Application
+  # ═══════════════════════════════════════════════════════════════════════════
+  raglox-api:
+    build:
+      context: ..
+      dockerfile: webapp/Dockerfile
+      target: production
+    container_name: raglox-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # App Configuration
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=${DEBUG:-false}
+      
+      # API Settings
+      - HOST=0.0.0.0
+      - PORT=8000
+      - API_PREFIX=/api/v1
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      
+      # Security
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRY_HOURS=${JWT_EXPIRY_HOURS:-24}
+      - API_KEY_HEADER=X-API-Key
+      
+      # Redis Configuration
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_HA_ENABLED=${REDIS_HA_ENABLED:-false}
+      
+      # PostgreSQL Configuration
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-raglox}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-raglox}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-raglox}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-raglox}
+      
+      # LLM Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_BASE=${LLM_API_BASE:-https://api.openai.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-60}
+      
+      # MinIO/S3 Configuration
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-raglox_access}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_SECURE=false
+      
+      # Elasticsearch (Intel)
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_ENABLED=${ELASTICSEARCH_ENABLED:-false}
+      
+      # Rate Limiting
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      
+      # Approval Settings
+      - APPROVAL_TTL_HOURS=${APPROVAL_TTL_HOURS:-24}
+      - APPROVAL_PERSISTENCE_ENABLED=true
+      
+    volumes:
+      - ../data:/app/data:ro
+      - raglox_logs:/app/logs
+      - raglox_uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - raglox-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # RAGLOX API - Development Mode
+  # ═══════════════════════════════════════════════════════════════════════════
+  raglox-api-dev:
+    build:
+      context: ..
+      dockerfile: webapp/Dockerfile
+      target: development
+    container_name: raglox-api-dev
+    profiles:
+      - dev
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-raglox}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-raglox}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_BASE=${LLM_API_BASE:-https://api.openai.com/v1}
+      - JWT_SECRET=${JWT_SECRET:-dev_secret_change_in_production}
+    volumes:
+      - ../src:/app/src:ro
+      - ../data:/app/data:ro
+      - ../tests:/app/tests:ro
+      - raglox_logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Redis - State Management & Pub/Sub
+  # ═══════════════════════════════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    container_name: raglox-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: >
+      redis-server 
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
+      --timeout 0
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - raglox-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Redis Sentinel - High Availability (Optional)
+  # ═══════════════════════════════════════════════════════════════════════════
+  redis-sentinel:
+    image: redis:7-alpine
+    container_name: raglox-redis-sentinel
+    profiles:
+      - ha
+    ports:
+      - "26379:26379"
+    command: >
+      redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./config/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PostgreSQL - Persistent Storage
+  # ═══════════════════════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:15-alpine
+    container_name: raglox-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-raglox}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-raglox}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raglox} -d ${POSTGRES_DB:-raglox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - raglox-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MinIO - Object Storage (S3 Compatible)
+  # ═══════════════════════════════════════════════════════════════════════════
+  minio:
+    image: minio/minio:latest
+    container_name: raglox-minio
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-raglox_access}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MinIO Setup - Create Buckets
+  # ═══════════════════════════════════════════════════════════════════════════
+  minio-setup:
+    image: minio/mc:latest
+    container_name: raglox-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-raglox_access}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set raglox http://minio:9000 $${MINIO_ACCESS_KEY} $${MINIO_SECRET_KEY};
+      mc mb --ignore-existing raglox/payloads;
+      mc mb --ignore-existing raglox/reports;
+      mc mb --ignore-existing raglox/logs;
+      mc mb --ignore-existing raglox/evidence;
+      mc mb --ignore-existing raglox/uploads;
+      echo 'MinIO buckets created successfully!';
+      "
+    networks:
+      - raglox-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Elasticsearch - Intelligence Data Lake
+  # ═══════════════════════════════════════════════════════════════════════════
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: raglox-elasticsearch
+    profiles:
+      - intel
+      - full
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - cluster.name=raglox-intel
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Nginx - Reverse Proxy & Load Balancer
+  # ═══════════════════════════════════════════════════════════════════════════
+  nginx:
+    image: nginx:alpine
+    container_name: raglox-nginx
+    profiles:
+      - production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - raglox-api
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Vulnerable Target - Testing Environment
+  # ═══════════════════════════════════════════════════════════════════════════
+  vulnerable-target:
+    build:
+      context: vulnerable_target
+      dockerfile: Dockerfile
+    container_name: raglox-vulnerable-target
+    profiles:
+      - testing
+    hostname: vulnerable-target
+    ports:
+      - "2222:22"
+      - "8088:80"
+    networks:
+      raglox-network:
+        ipv4_address: 172.28.0.100
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Redis Commander - Redis UI (Development)
+  # ═══════════════════════════════════════════════════════════════════════════
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: raglox-redis-commander
+    profiles:
+      - dev
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379${REDIS_PASSWORD:+:${REDIS_PASSWORD}}
+    depends_on:
+      - redis
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Adminer - Database UI (Development)
+  # ═══════════════════════════════════════════════════════════════════════════
+  adminer:
+    image: adminer:latest
+    container_name: raglox-adminer
+    profiles:
+      - dev
+    ports:
+      - "8082:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+    depends_on:
+      - postgres
+    networks:
+      - raglox-network
+    restart: unless-stopped
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Volumes
+# ═══════════════════════════════════════════════════════════════════════════════
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  raglox_logs:
+    driver: local
+  raglox_uploads:
+    driver: local
+  nginx_logs:
+    driver: local
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Networks
+# ═══════════════════════════════════════════════════════════════════════════════
+networks:
+  raglox-network:
+    name: raglox-network
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/24
+          gateway: 172.28.0.1

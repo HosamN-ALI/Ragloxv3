@@ -23,6 +23,17 @@ from ..controller.mission import MissionController
 from .routes import router
 from .websocket import websocket_router
 from .knowledge_routes import router as knowledge_router
+from .exploitation_routes import router as exploitation_router
+from .security_routes import router as security_router
+from .infrastructure_routes import router as infrastructure_router
+from .workflow_routes import router as workflow_router
+from .auth_routes import router as auth_router
+
+# ═══════════════════════════════════════════════════════════════
+# SEC-03 & SEC-04: Security Middleware
+# ═══════════════════════════════════════════════════════════════
+from .middleware.rate_limit_middleware import RateLimitMiddleware
+from .middleware.validation_middleware import ValidationMiddleware
 
 # ═══════════════════════════════════════════════════════════════
 # INTEGRATION: Shutdown Manager
@@ -112,6 +123,171 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # ═══════════════════════════════════════════════════════════════
     shutdown_manager = get_shutdown_manager()
     logger.info("🛡️ Shutdown Manager initialized")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize Metasploit & Exploitation Framework
+    # ═══════════════════════════════════════════════════════════════
+    metasploit_adapter = None
+    if settings.use_real_exploits:
+        try:
+            from ..exploitation.adapters.metasploit_adapter import get_metasploit_adapter
+            logger.info("🎯 Real Exploitation ENABLED - Initializing Metasploit RPC...")
+            logger.info(f"   MSF RPC: {settings.msf_rpc_host}:{settings.msf_rpc_port}")
+            
+            metasploit_adapter = get_metasploit_adapter(
+                host=settings.msf_rpc_host,
+                port=settings.msf_rpc_port,
+                username=settings.msf_rpc_user,
+                password=settings.msf_rpc_pass,
+                ssl=settings.msf_rpc_ssl
+            )
+            
+            # Test connection
+            if metasploit_adapter.connect():
+                logger.info("✅ Metasploit RPC Connected Successfully")
+                version = metasploit_adapter.get_version()
+                exploits = metasploit_adapter.list_exploits()
+                logger.info(f"   Metasploit Version: {version}")
+                logger.info(f"   Available Modules: {len(exploits) if exploits else 0}")
+                
+                # Register for graceful shutdown
+                shutdown_manager.register(
+                    name="metasploit_adapter",
+                    shutdown_func=metasploit_adapter.disconnect,
+                    priority=40,
+                    timeout=10.0
+                )
+            else:
+                logger.error("❌ Failed to connect to Metasploit RPC")
+                logger.warning("   Falling back to SIMULATION mode")
+                metasploit_adapter = None
+        except Exception as e:
+            logger.error(f"❌ Metasploit initialization failed: {e}")
+            logger.warning("   Falling back to SIMULATION mode")
+            metasploit_adapter = None
+    else:
+        logger.info("🔵 Real Exploitation DISABLED (USE_REAL_EXPLOITS=false)")
+        logger.info("   System running in SIMULATION mode")
+    
+    # Store MetasploitAdapter in app state for global access
+    app.state.metasploit_adapter = metasploit_adapter
+    app.state.use_real_exploits = settings.use_real_exploits and metasploit_adapter is not None
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize C2 Session Manager
+    # ═══════════════════════════════════════════════════════════════
+    c2_manager = None
+    if settings.use_real_exploits:
+        try:
+            from ..exploitation.c2.session_manager import C2SessionManager
+            logger.info("🌐 Initializing C2 Session Manager...")
+            
+            c2_manager = C2SessionManager(
+                encryption_enabled=settings.c2_encryption_enabled,
+                data_dir=settings.c2_data_dir
+            )
+            
+            logger.info(f"✅ C2 Session Manager Initialized")
+            logger.info(f"   Encryption: {'Enabled (AES-256-GCM)' if settings.c2_encryption_enabled else 'Disabled'}")
+            logger.info(f"   Data Directory: {settings.c2_data_dir}")
+            
+            # Register for graceful shutdown
+            shutdown_manager.register(
+                name="c2_session_manager",
+                shutdown_func=c2_manager.cleanup_all_sessions,
+                priority=35,
+                timeout=15.0
+            )
+        except Exception as e:
+            logger.error(f"❌ C2 Session Manager initialization failed: {e}")
+            c2_manager = None
+    
+    # Store C2SessionManager in app state
+    app.state.c2_manager = c2_manager
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize OneProvider Cloud & SSH Infrastructure
+    # ═══════════════════════════════════════════════════════════════
+    vm_manager = None
+    ssh_manager = None
+    environment_manager = None
+    
+    if settings.oneprovider_enabled and settings.oneprovider_api_key:
+        try:
+            from ..infrastructure.cloud_provider import OneProviderClient, VMManager
+            logger.info("☁️ Initializing OneProvider Cloud Integration...")
+            
+            oneprovider_client = OneProviderClient(
+                api_key=settings.oneprovider_api_key,
+                client_key=settings.oneprovider_client_key,
+                timeout=30,
+                max_retries=3
+            )
+            
+            vm_manager = VMManager(
+                client=oneprovider_client,
+                default_project_uuid=settings.oneprovider_project_uuid
+            )
+            
+            logger.info(f"✅ OneProvider Cloud Integration Initialized")
+            logger.info(f"   Default Plan: {settings.oneprovider_default_plan}")
+            logger.info(f"   Default Location: {settings.oneprovider_default_location}")
+            
+        except Exception as e:
+            logger.error(f"❌ OneProvider initialization failed: {e}")
+            vm_manager = None
+    else:
+        logger.info("☁️ OneProvider Cloud Integration DISABLED")
+    
+    # Initialize SSH Connection Manager
+    if settings.ssh_enabled:
+        try:
+            from ..infrastructure.ssh.connection_manager import SSHConnectionManager, get_ssh_manager
+            logger.info("🔐 Initializing SSH Connection Manager...")
+            
+            ssh_manager = get_ssh_manager(max_connections=settings.ssh_max_connections)
+            
+            logger.info(f"✅ SSH Connection Manager Initialized")
+            logger.info(f"   Max Connections: {settings.ssh_max_connections}")
+            logger.info(f"   Keepalive Interval: {settings.ssh_keepalive_interval}s")
+            
+            # Register for graceful shutdown
+            shutdown_manager.register(
+                name="ssh_connection_manager",
+                shutdown_func=ssh_manager.shutdown,
+                priority=30,
+                timeout=15.0
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ SSH Connection Manager initialization failed: {e}")
+            ssh_manager = None
+    else:
+        logger.info("🔐 SSH Connection Manager DISABLED")
+    
+    # Initialize Environment Manager (combines VM + SSH)
+    if vm_manager or ssh_manager:
+        try:
+            from ..infrastructure.orchestrator import EnvironmentManager
+            logger.info("🌍 Initializing Environment Manager...")
+            
+            environment_manager = EnvironmentManager(
+                vm_manager=vm_manager,
+                max_environments_per_user=settings.agent_max_environments_per_user
+            )
+            
+            logger.info(f"✅ Environment Manager Initialized")
+            logger.info(f"   Max Environments/User: {settings.agent_max_environments_per_user}")
+            
+        except Exception as e:
+            logger.error(f"❌ Environment Manager initialization failed: {e}")
+            environment_manager = None
+    
+    # Store in app state
+    app.state.vm_manager = vm_manager
+    app.state.ssh_manager = ssh_manager
+    app.state.environment_manager = environment_manager
+    app.state.settings = settings
     
     # Initialize Knowledge Base (in-memory, fast)
     knowledge = init_knowledge(data_path=settings.knowledge_data_path)
@@ -226,9 +402,37 @@ def create_app() -> FastAPI:
         max_age=3600,  # Cache preflight response for 1 hour
     )
     
+    # ═══════════════════════════════════════════════════════════════
+    # SEC-03: Input Validation Middleware
+    # ═══════════════════════════════════════════════════════════════
+    app.add_middleware(
+        ValidationMiddleware,
+        check_xss=True,
+        check_sql=True,
+        check_command=True,
+        check_path=True,
+        max_body_size=10 * 1024 * 1024,  # 10MB
+        enabled=settings.security_validation_enabled if hasattr(settings, 'security_validation_enabled') else True,
+    )
+    logger.info("🔒 SEC-03: Input Validation Middleware enabled")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # SEC-04: Rate Limiting Middleware
+    # ═══════════════════════════════════════════════════════════════
+    app.add_middleware(
+        RateLimitMiddleware,
+        enabled=settings.rate_limiting_enabled if hasattr(settings, 'rate_limiting_enabled') else True,
+    )
+    logger.info("🚦 SEC-04: Rate Limiting Middleware enabled")
+    
     # Include routers
+    app.include_router(auth_router, prefix="/api/v1")  # Authentication (must be first for security)
     app.include_router(router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
+    app.include_router(exploitation_router, prefix="/api/v1")
+    app.include_router(security_router, prefix="/api/v1")  # SEC-03 & SEC-04 endpoints
+    app.include_router(infrastructure_router, prefix="/api/v1")  # SSH & Cloud Infrastructure
+    app.include_router(workflow_router, prefix="/api/v1")  # Advanced Workflow Orchestration
     app.include_router(websocket_router)
     
     return app

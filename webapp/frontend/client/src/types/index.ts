@@ -417,27 +417,56 @@ export interface PaginatedResponse<T> {
 // Authentication Types
 // ============================================
 
-export enum UserRole {
-  ADMIN = "admin",
-  OPERATOR = "operator",
-  VIEWER = "viewer"
-}
+// User roles from backend
+export type UserRole = "admin" | "operator" | "analyst" | "viewer";
+
+// User account status
+export type UserStatus = "pending" | "provisioning" | "active" | "suspended" | "deleted";
+
+// VM provisioning status
+export type VMProvisionStatus = "pending" | "creating" | "configuring" | "ready" | "failed";
 
 export interface User {
   id: string;
-  username: string;
   email: string;
+  full_name: string;
+  organization?: string;
   role: UserRole;
+  status: UserStatus;
+  vm_status?: VMProvisionStatus;
+  vm_ip?: string;
   created_at: string;
   last_login?: string;
 }
 
 export interface LoginRequest {
-  username: string;
+  email: string;
   password: string;
+  remember_me?: boolean;
 }
 
 export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  user: User;
+}
+
+export interface VMConfiguration {
+  plan: string;
+  location: string;
+  os: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  full_name: string;
+  organization?: string;
+  vm_config?: VMConfiguration;
+}
+
+export interface RegisterResponse {
   access_token: string;
   token_type: string;
   expires_in: number;

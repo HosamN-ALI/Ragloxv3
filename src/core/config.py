@@ -67,6 +67,58 @@ class Settings(BaseSettings):
     )
     
     # ═══════════════════════════════════════════════════════════
+    # REL-01: Redis High Availability Settings
+    # ═══════════════════════════════════════════════════════════
+    redis_mode: str = Field(
+        default="standalone",
+        description="Redis mode: standalone, sentinel, cluster"
+    )
+    redis_sentinel_hosts: str = Field(
+        default="",
+        description="Comma-separated list of Sentinel hosts (host:port,host:port)"
+    )
+    redis_sentinel_master: str = Field(
+        default="mymaster",
+        description="Sentinel master name"
+    )
+    redis_cluster_nodes: str = Field(
+        default="",
+        description="Comma-separated list of cluster nodes (host:port,host:port)"
+    )
+    redis_health_check_interval: int = Field(
+        default=30,
+        description="Redis health check interval in seconds"
+    )
+    redis_reconnect_max_attempts: int = Field(
+        default=10,
+        description="Maximum Redis reconnection attempts"
+    )
+    redis_socket_timeout: float = Field(
+        default=5.0,
+        description="Redis socket timeout in seconds"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # REL-02: Approval Persistence Settings
+    # ═══════════════════════════════════════════════════════════
+    approval_ttl_pending: int = Field(
+        default=86400,
+        description="TTL for pending approvals in seconds (24 hours)"
+    )
+    approval_ttl_completed: int = Field(
+        default=604800,
+        description="TTL for completed approvals in seconds (7 days)"
+    )
+    chat_history_ttl: int = Field(
+        default=2592000,
+        description="TTL for chat history in seconds (30 days)"
+    )
+    approval_audit_ttl: int = Field(
+        default=7776000,
+        description="TTL for approval audit logs in seconds (90 days)"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
     # PostgreSQL
     # ═══════════════════════════════════════════════════════════
     database_url: str = Field(
@@ -97,17 +149,108 @@ class Settings(BaseSettings):
     s3_bucket_evidence: str = Field(default="evidence", description="Evidence bucket")
     
     # ═══════════════════════════════════════════════════════════
-    # JWT Authentication
+    # JWT Authentication (SEC-05: Hardened)
     # ═══════════════════════════════════════════════════════════
     jwt_secret: str = Field(
-        default="change-this-secret-in-production",
-        description="JWT secret key"
+        default="",  # Empty default - will generate secure one if not set
+        description="JWT secret key (minimum 32 characters for production)"
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
     jwt_expiration_hours: int = Field(
         default=24,
-        description="JWT expiration in hours"
+        ge=1,
+        le=168,  # Max 1 week
+        description="JWT expiration in hours (1-168)"
     )
+    
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """
+        Validate JWT secret strength.
+        
+        SEC-05: JWT Security Hardening
+        - Auto-generates secure secret if empty
+        - Rejects insecure default values
+        - Enforces minimum length of 32 characters in production
+        - Checks for minimum entropy
+        """
+        import secrets
+        import os
+        import logging
+        
+        # Auto-generate if empty
+        if not v:
+            generated = secrets.token_urlsafe(48)
+            logging.getLogger("raglox.config").warning(
+                "JWT_SECRET not set. Auto-generated secure secret for this session. "
+                "For production, set JWT_SECRET environment variable."
+            )
+            return generated
+        
+        # Reject known insecure defaults
+        insecure_defaults = [
+            "change-this-secret-in-production",
+            "secret",
+            "jwt_secret",
+            "your-secret-key",
+            "changeme",
+        ]
+        if v.lower() in [d.lower() for d in insecure_defaults]:
+            # In dev mode, generate secure secret
+            if os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes"):
+                generated = secrets.token_urlsafe(48)
+                logging.getLogger("raglox.config").warning(
+                    "Insecure JWT_SECRET detected in dev mode. Auto-generated secure secret."
+                )
+                return generated
+            raise ValueError(
+                "JWT secret must be changed from default/insecure value. "
+                "Generate a secure secret with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        
+        # Enforce minimum length (warn in dev, error in production)
+        if len(v) < 32:
+            if os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes"):
+                logging.getLogger("raglox.config").warning(
+                    f"JWT secret is too short ({len(v)} chars). Should be at least 32 chars."
+                )
+                return v
+            raise ValueError(
+                f"JWT secret must be at least 32 characters (got {len(v)}). "
+                "Generate a secure secret with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        
+        # Check for minimum entropy (at least 10 unique characters)
+        if len(set(v)) < 10:
+            logging.getLogger("raglox.config").warning(
+                "JWT secret has low entropy. Consider using a more random value."
+            )
+        
+        return v
+    
+    @staticmethod
+    def generate_jwt_secret() -> str:
+        """Generate a cryptographically secure JWT secret."""
+        import secrets
+        return secrets.token_urlsafe(48)
+    
+    def is_jwt_secret_secure(self) -> bool:
+        """Check if the current JWT secret meets security requirements."""
+        if len(self.jwt_secret) < 32:
+            return False
+        if len(set(self.jwt_secret)) < 10:
+            return False
+        insecure_defaults = [
+            "change-this-secret-in-production",
+            "secret",
+            "jwt_secret",
+            "your-secret-key",
+            "changeme",
+        ]
+        if self.jwt_secret.lower() in [d.lower() for d in insecure_defaults]:
+            return False
+        return True
     
     # ═══════════════════════════════════════════════════════════
     # Security
@@ -115,6 +258,66 @@ class Settings(BaseSettings):
     encryption_key: str = Field(
         default="",
         description="Base64 encoded 32-byte encryption key"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # SEC-03: Input Validation Settings
+    # ═══════════════════════════════════════════════════════════
+    security_validation_enabled: bool = Field(
+        default=True,
+        description="Enable input validation middleware (SEC-03)"
+    )
+    security_check_xss: bool = Field(
+        default=True,
+        description="Check for XSS patterns in inputs"
+    )
+    security_check_sql: bool = Field(
+        default=True,
+        description="Check for SQL injection patterns in inputs"
+    )
+    security_check_command: bool = Field(
+        default=True,
+        description="Check for command injection patterns in inputs"
+    )
+    security_check_path: bool = Field(
+        default=True,
+        description="Check for path traversal patterns in inputs"
+    )
+    security_max_body_size: int = Field(
+        default=10 * 1024 * 1024,  # 10MB
+        description="Maximum request body size in bytes"
+    )
+    security_max_param_length: int = Field(
+        default=10000,
+        description="Maximum parameter length"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # SEC-04: Rate Limiting Settings
+    # ═══════════════════════════════════════════════════════════
+    rate_limiting_enabled: bool = Field(
+        default=True,
+        description="Enable rate limiting middleware (SEC-04)"
+    )
+    rate_limit_default: int = Field(
+        default=100,
+        description="Default requests per minute"
+    )
+    rate_limit_missions_create: int = Field(
+        default=10,
+        description="Rate limit for mission creation (per minute)"
+    )
+    rate_limit_exploit_execute: int = Field(
+        default=5,
+        description="Rate limit for exploit execution (per minute)"
+    )
+    rate_limit_chat: int = Field(
+        default=30,
+        description="Rate limit for chat messages (per minute)"
+    )
+    rate_limit_websocket: int = Field(
+        default=10,
+        description="Rate limit for WebSocket connections (per minute)"
     )
     
     # ═══════════════════════════════════════════════════════════
@@ -199,6 +402,168 @@ class Settings(BaseSettings):
     intel_credential_priority_boost: float = Field(
         default=0.3,
         description="Priority boost for intel credentials over brute force (0.0-0.5)"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # Metasploit & Exploitation Framework
+    # ═══════════════════════════════════════════════════════════
+    use_real_exploits: bool = Field(
+        default=False,
+        description="Enable real exploitation (requires Metasploit RPC)"
+    )
+    msf_rpc_host: str = Field(
+        default="localhost",
+        description="Metasploit RPC server host"
+    )
+    msf_rpc_port: int = Field(
+        default=55553,
+        description="Metasploit RPC server port"
+    )
+    msf_rpc_user: str = Field(
+        default="msf",
+        description="Metasploit RPC username"
+    )
+    msf_rpc_pass: str = Field(
+        default="",
+        description="Metasploit RPC password"
+    )
+    msf_rpc_ssl: bool = Field(
+        default=False,
+        description="Use SSL for Metasploit RPC connection"
+    )
+    msf_rpc_timeout: int = Field(
+        default=30,
+        description="Metasploit RPC connection timeout in seconds"
+    )
+    
+    # Exploitation Listener Configuration
+    lhost: str = Field(
+        default="0.0.0.0",
+        description="Listener host for reverse shells (LHOST)"
+    )
+    lport: int = Field(
+        default=4444,
+        description="Listener port for reverse shells (LPORT)"
+    )
+    
+    # C2 Configuration
+    c2_encryption_enabled: bool = Field(
+        default=True,
+        description="Enable AES-256-GCM encryption for C2 sessions"
+    )
+    c2_data_dir: str = Field(
+        default="data/c2",
+        description="Directory for C2 session data and logs"
+    )
+    c2_session_timeout: int = Field(
+        default=3600,
+        description="C2 session timeout in seconds (1 hour)"
+    )
+    c2_heartbeat_interval: int = Field(
+        default=60,
+        description="C2 heartbeat interval in seconds"
+    )
+    
+    # Post-Exploitation Configuration
+    mimikatz_enabled: bool = Field(
+        default=True,
+        description="Enable Mimikatz credential harvesting"
+    )
+    network_pivoting_enabled: bool = Field(
+        default=True,
+        description="Enable network pivoting and SOCKS proxy"
+    )
+    socks_proxy_port: int = Field(
+        default=1080,
+        description="SOCKS proxy port for network pivoting"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # OneProvider Cloud Integration
+    # ═══════════════════════════════════════════════════════════
+    oneprovider_enabled: bool = Field(
+        default=False,
+        description="Enable OneProvider cloud integration for VM provisioning"
+    )
+    oneprovider_api_key: str = Field(
+        default="",
+        description="OneProvider API key (Personal API Key)"
+    )
+    oneprovider_client_key: str = Field(
+        default="",
+        description="OneProvider CLIENT key (Secret Key)"
+    )
+    oneprovider_project_uuid: str = Field(
+        default="",
+        description="Default OneProvider project UUID for VM creation"
+    )
+    oneprovider_default_plan: str = Field(
+        default="8GB-2CORE",
+        description="Default VM plan (e.g., 8GB-2CORE, 16GB-4CORE)"
+    )
+    oneprovider_default_os: str = Field(
+        default="ubuntu-22.04",
+        description="Default OS for VM provisioning"
+    )
+    oneprovider_default_location: str = Field(
+        default="us-east",
+        description="Default datacenter location"
+    )
+    oneprovider_vm_timeout: int = Field(
+        default=600,
+        description="Timeout for VM provisioning in seconds (10 minutes)"
+    )
+    oneprovider_max_vms: int = Field(
+        default=10,
+        description="Maximum concurrent VMs per tenant"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # SSH Infrastructure
+    # ═══════════════════════════════════════════════════════════
+    ssh_enabled: bool = Field(
+        default=True,
+        description="Enable SSH infrastructure for remote connections"
+    )
+    ssh_max_connections: int = Field(
+        default=50,
+        description="Maximum concurrent SSH connections"
+    )
+    ssh_default_timeout: int = Field(
+        default=30,
+        description="Default SSH connection timeout in seconds"
+    )
+    ssh_keepalive_interval: int = Field(
+        default=30,
+        description="SSH keepalive interval in seconds"
+    )
+    ssh_key_directory: str = Field(
+        default="data/ssh_keys",
+        description="Directory for SSH key storage"
+    )
+    ssh_known_hosts_file: str = Field(
+        default="data/known_hosts",
+        description="SSH known hosts file path"
+    )
+    ssh_auto_add_host_keys: bool = Field(
+        default=True,
+        description="Automatically add host keys (development only)"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # Agent Environment Configuration
+    # ═══════════════════════════════════════════════════════════
+    agent_max_environments_per_user: int = Field(
+        default=10,
+        description="Maximum environments per user"
+    )
+    agent_environment_timeout: int = Field(
+        default=7200,
+        description="Environment inactivity timeout in seconds (2 hours)"
+    )
+    agent_install_script_url: str = Field(
+        default="",
+        description="URL for agent installation script"
     )
     
     # ═══════════════════════════════════════════════════════════

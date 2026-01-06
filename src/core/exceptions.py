@@ -750,6 +750,472 @@ class InternalServerError(APIException):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Network & External Service Exceptions
+# ═══════════════════════════════════════════════════════════════
+
+class NetworkException(RAGLOXException):
+    """Base exception for network-related errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        self.host = host
+        self.port = port
+        super().__init__(
+            message=message,
+            error_code="NETWORK_ERROR",
+            details={
+                "host": host,
+                "port": port,
+                **(details or {})
+            },
+            original_error=original_error
+        )
+
+
+class ConnectionTimeoutError(NetworkException):
+    """Connection timed out."""
+    
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        timeout_seconds: float,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Connection to {host}:{port} timed out after {timeout_seconds}s",
+            host=host,
+            port=port,
+            details={"timeout_seconds": timeout_seconds, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "CONNECTION_TIMEOUT"
+        self.timeout_seconds = timeout_seconds
+
+
+class ServiceUnavailableError(NetworkException):
+    """External service is unavailable."""
+    
+    def __init__(
+        self,
+        service_name: str,
+        message: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=message or f"Service '{service_name}' is unavailable",
+            details={"service_name": service_name, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "SERVICE_UNAVAILABLE"
+        self.service_name = service_name
+
+
+class ExternalAPIError(NetworkException):
+    """Error from external API."""
+    
+    def __init__(
+        self,
+        api_name: str,
+        status_code: Optional[int] = None,
+        message: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=message or f"External API '{api_name}' returned an error",
+            details={
+                "api_name": api_name,
+                "status_code": status_code,
+                **(details or {})
+            },
+            original_error=original_error
+        )
+        self.error_code = "EXTERNAL_API_ERROR"
+        self.api_name = api_name
+        self.status_code = status_code
+
+
+# ═══════════════════════════════════════════════════════════════
+# Exploitation Exceptions
+# ═══════════════════════════════════════════════════════════════
+
+class ExploitationException(RAGLOXException):
+    """Base exception for exploitation-related errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        exploit_id: Optional[str] = None,
+        target_id: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        self.exploit_id = exploit_id
+        self.target_id = target_id
+        super().__init__(
+            message=message,
+            error_code="EXPLOITATION_ERROR",
+            details={
+                "exploit_id": exploit_id,
+                "target_id": target_id,
+                **(details or {})
+            },
+            original_error=original_error
+        )
+
+
+class ExploitNotFoundError(ExploitationException):
+    """Exploit not found in repository."""
+    
+    def __init__(
+        self,
+        exploit_id: str,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(
+            message=f"Exploit not found: {exploit_id}",
+            exploit_id=exploit_id,
+            details=details
+        )
+        self.error_code = "EXPLOIT_NOT_FOUND"
+
+
+class ExploitExecutionError(ExploitationException):
+    """Exploit execution failed."""
+    
+    def __init__(
+        self,
+        exploit_id: str,
+        target_id: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Exploit {exploit_id} failed on target {target_id}: {reason}",
+            exploit_id=exploit_id,
+            target_id=target_id,
+            details={"reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "EXPLOIT_EXECUTION_ERROR"
+        self.reason = reason
+
+
+class SessionCreationError(ExploitationException):
+    """Failed to create C2 session."""
+    
+    def __init__(
+        self,
+        target_id: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Failed to create session for target {target_id}: {reason}",
+            target_id=target_id,
+            details={"reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "SESSION_CREATION_ERROR"
+        self.reason = reason
+
+
+class PayloadGenerationError(ExploitationException):
+    """Failed to generate payload."""
+    
+    def __init__(
+        self,
+        payload_type: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Failed to generate {payload_type} payload: {reason}",
+            details={"payload_type": payload_type, "reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "PAYLOAD_GENERATION_ERROR"
+        self.payload_type = payload_type
+        self.reason = reason
+
+
+# ═══════════════════════════════════════════════════════════════
+# Configuration Exceptions
+# ═══════════════════════════════════════════════════════════════
+
+class ConfigurationException(RAGLOXException):
+    """Base exception for configuration errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        config_key: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        self.config_key = config_key
+        super().__init__(
+            message=message,
+            error_code="CONFIGURATION_ERROR",
+            details={"config_key": config_key, **(details or {})}
+        )
+
+
+class MissingConfigurationError(ConfigurationException):
+    """Required configuration is missing."""
+    
+    def __init__(
+        self,
+        config_key: str,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(
+            message=f"Missing required configuration: {config_key}",
+            config_key=config_key,
+            details=details
+        )
+        self.error_code = "MISSING_CONFIGURATION"
+
+
+class InvalidConfigurationError(ConfigurationException):
+    """Configuration value is invalid."""
+    
+    def __init__(
+        self,
+        config_key: str,
+        value: Any,
+        expected: str,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(
+            message=f"Invalid configuration for '{config_key}': expected {expected}, got {type(value).__name__}",
+            config_key=config_key,
+            details={"value": str(value), "expected": expected, **(details or {})}
+        )
+        self.error_code = "INVALID_CONFIGURATION"
+        self.value = value
+        self.expected = expected
+
+
+# ═══════════════════════════════════════════════════════════════
+# File Operation Exceptions
+# ═══════════════════════════════════════════════════════════════
+
+class FileOperationException(RAGLOXException):
+    """Base exception for file operation errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        file_path: Optional[str] = None,
+        operation: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        self.file_path = file_path
+        self.operation = operation
+        super().__init__(
+            message=message,
+            error_code="FILE_OPERATION_ERROR",
+            details={
+                "file_path": file_path,
+                "operation": operation,
+                **(details or {})
+            },
+            original_error=original_error
+        )
+
+
+class FileReadError(FileOperationException):
+    """Failed to read file."""
+    
+    def __init__(
+        self,
+        file_path: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Failed to read file '{file_path}': {reason}",
+            file_path=file_path,
+            operation="read",
+            details={"reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "FILE_READ_ERROR"
+        self.reason = reason
+
+
+class FileWriteError(FileOperationException):
+    """Failed to write file."""
+    
+    def __init__(
+        self,
+        file_path: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Failed to write file '{file_path}': {reason}",
+            file_path=file_path,
+            operation="write",
+            details={"reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "FILE_WRITE_ERROR"
+        self.reason = reason
+
+
+# ═══════════════════════════════════════════════════════════════
+# LLM Exceptions
+# ═══════════════════════════════════════════════════════════════
+
+class LLMException(RAGLOXException):
+    """Base exception for LLM-related errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        self.provider = provider
+        self.model = model
+        super().__init__(
+            message=message,
+            error_code="LLM_ERROR",
+            details={
+                "provider": provider,
+                "model": model,
+                **(details or {})
+            },
+            original_error=original_error
+        )
+
+
+class LLMRateLimitError(LLMException):
+    """LLM rate limit exceeded."""
+    
+    def __init__(
+        self,
+        provider: str,
+        retry_after: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"LLM rate limit exceeded for provider '{provider}'",
+            provider=provider,
+            details={"retry_after_seconds": retry_after, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "LLM_RATE_LIMIT"
+        self.retry_after = retry_after
+
+
+class LLMResponseError(LLMException):
+    """Invalid or unexpected LLM response."""
+    
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Invalid response from LLM '{provider}/{model}': {reason}",
+            provider=provider,
+            model=model,
+            details={"reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "LLM_RESPONSE_ERROR"
+        self.reason = reason
+
+
+# ═══════════════════════════════════════════════════════════════
+# Data Parsing Exceptions
+# ═══════════════════════════════════════════════════════════════
+
+class DataParsingException(RAGLOXException):
+    """Base exception for data parsing errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        data_type: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        self.data_type = data_type
+        super().__init__(
+            message=message,
+            error_code="DATA_PARSING_ERROR",
+            details={"data_type": data_type, **(details or {})},
+            original_error=original_error
+        )
+
+
+class JSONParsingError(DataParsingException):
+    """Failed to parse JSON data."""
+    
+    def __init__(
+        self,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None
+    ):
+        super().__init__(
+            message=f"Failed to parse JSON: {reason}",
+            data_type="json",
+            details={"reason": reason, **(details or {})},
+            original_error=original_error
+        )
+        self.error_code = "JSON_PARSING_ERROR"
+        self.reason = reason
+
+
+class SchemaValidationError(DataParsingException):
+    """Data schema validation failed."""
+    
+    def __init__(
+        self,
+        schema_name: str,
+        validation_errors: list,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(
+            message=f"Schema validation failed for '{schema_name}'",
+            data_type="schema",
+            details={
+                "schema_name": schema_name,
+                "validation_errors": validation_errors,
+                **(details or {})
+            }
+        )
+        self.error_code = "SCHEMA_VALIDATION_ERROR"
+        self.schema_name = schema_name
+        self.validation_errors = validation_errors
+
+
+# ═══════════════════════════════════════════════════════════════
 # Utility Functions
 # ═══════════════════════════════════════════════════════════════
 
@@ -773,3 +1239,61 @@ def wrap_exception(
         details={"original_type": type(original).__name__},
         original_error=original
     )
+
+
+def sanitize_error_message(error: Exception) -> str:
+    """
+    Sanitize error message to remove sensitive information.
+    
+    Args:
+        error: The exception to sanitize
+        
+    Returns:
+        Sanitized error message
+    """
+    import re
+    
+    message = str(error)
+    
+    # Patterns to mask
+    patterns = [
+        (r'password["\']?\s*[:=]\s*["\']?[^\s"\']+', 'password=***'),
+        (r'secret["\']?\s*[:=]\s*["\']?[^\s"\']+', 'secret=***'),
+        (r'api_key["\']?\s*[:=]\s*["\']?[^\s"\']+', 'api_key=***'),
+        (r'token["\']?\s*[:=]\s*["\']?[^\s"\']+', 'token=***'),
+        (r'Bearer\s+[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+', 'Bearer ***'),
+        (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '***@***.***'),
+    ]
+    
+    for pattern, replacement in patterns:
+        message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
+    
+    return message
+
+
+def get_exception_for_status_code(status_code: int, message: str = "") -> APIException:
+    """
+    Get appropriate API exception for HTTP status code.
+    
+    Args:
+        status_code: HTTP status code
+        message: Error message
+        
+    Returns:
+        Appropriate APIException subclass
+    """
+    exceptions = {
+        400: BadRequestError,
+        401: AuthenticationError,
+        403: AuthorizationError,
+        404: lambda m: NotFoundError("resource", "unknown"),
+        409: ConflictError,
+        429: lambda m: RateLimitExceededError(m),
+        500: InternalServerError,
+        503: lambda m: ServiceUnavailableError("unknown", m),
+    }
+    
+    exception_class = exceptions.get(status_code, InternalServerError)
+    if callable(exception_class):
+        return exception_class(message)
+    return exception_class(message)

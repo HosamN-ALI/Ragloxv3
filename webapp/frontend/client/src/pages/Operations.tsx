@@ -29,12 +29,19 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { DEFAULT_MISSION_ID, POLLING_INTERVAL } from "@/lib/config";
+import { POLLING_INTERVAL } from "@/lib/config";
 
 export default function Operations() {
   const params = useParams<{ missionId?: string }>();
   const [, setLocation] = useLocation();
-  const missionId = params.missionId || DEFAULT_MISSION_ID;
+  
+  // If no mission ID provided, redirect to missions list
+  if (!params.missionId) {
+    setLocation("/missions");
+    return null;
+  }
+  
+  const missionId = params.missionId;
 
   // Zustand store for mission data
   const {
