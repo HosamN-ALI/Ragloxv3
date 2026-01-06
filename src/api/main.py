@@ -20,6 +20,18 @@ logger = logging.getLogger("raglox")
 from ..core.blackboard import Blackboard
 from ..core.knowledge import EmbeddedKnowledge, init_knowledge
 from ..controller.mission import MissionController
+
+# ===================================================================
+# DATABASE: PostgreSQL Connection Pool
+# ===================================================================
+from ..core.database import (
+    init_db_pool,
+    close_db_pool,
+    get_db_pool,
+    UserRepository,
+    OrganizationRepository,
+    MissionRepository,
+)
 from .routes import router
 from .websocket import websocket_router
 from .knowledge_routes import router as knowledge_router
@@ -47,6 +59,7 @@ blackboard: Blackboard = None
 controller: MissionController = None
 knowledge: EmbeddedKnowledge = None
 shutdown_manager: ShutdownManager = None
+db_pool = None  # PostgreSQL connection pool
 
 
 def init_llm_service(settings) -> None:
@@ -115,9 +128,46 @@ def init_llm_service(settings) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Application lifespan manager."""
-    global blackboard, controller, knowledge, shutdown_manager
+    global blackboard, controller, knowledge, shutdown_manager, db_pool
     
     settings = get_settings()
+    
+    # ===================================================================
+    # DATABASE: Initialize PostgreSQL Connection Pool
+    # ===================================================================
+    try:
+        logger.info("🗄️ Initializing PostgreSQL Connection Pool...")
+        db_pool = await init_db_pool(
+            database_url=settings.database_url,
+            min_size=5,
+            max_size=settings.db_pool_size or 20,
+        )
+        
+        # Health check
+        health = await db_pool.health_check()
+        if health.get("healthy"):
+            logger.info(f"✅ PostgreSQL Connected: {health.get('version', 'unknown')[:50]}...")
+            logger.info(f"   Pool Size: {health.get('pool_size', 0)} connections")
+        else:
+            logger.warning(f"⚠️ PostgreSQL health check failed: {health.get('error')}")
+            logger.warning("   System will use in-memory fallback where needed")
+        
+        # Initialize repositories
+        app.state.db_pool = db_pool
+        app.state.user_repo = UserRepository(db_pool)
+        app.state.org_repo = OrganizationRepository(db_pool)
+        app.state.mission_repo = MissionRepository(db_pool)
+        
+        logger.info("✅ Database repositories initialized")
+        
+    except Exception as e:
+        logger.error(f"❌ PostgreSQL initialization failed: {e}")
+        logger.warning("   Continuing without PostgreSQL (in-memory mode)")
+        db_pool = None
+        app.state.db_pool = None
+        app.state.user_repo = None
+        app.state.org_repo = None
+        app.state.mission_repo = None
     
     # ═══════════════════════════════════════════════════════════════
     # INTEGRATION: Initialize Shutdown Manager
@@ -390,6 +440,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.warning("ShutdownManager not available, using fallback shutdown")
         await controller.shutdown()
         await blackboard.disconnect()
+    
+    # Close PostgreSQL connection pool
+    if db_pool:
+        logger.info("Closing PostgreSQL connection pool...")
+        await close_db_pool()
+        logger.info("✅ PostgreSQL pool closed")
     
     print("✓ RAGLOX shutdown complete")
 
