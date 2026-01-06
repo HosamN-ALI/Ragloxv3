@@ -62,7 +62,8 @@ class MissionController:
     def __init__(
         self,
         blackboard: Optional[Blackboard] = None,
-        settings: Optional[Settings] = None
+        settings: Optional[Settings] = None,
+        environment_manager: Optional[Any] = None
     ):
         """
         Initialize the Mission Controller.
@@ -70,9 +71,13 @@ class MissionController:
         Args:
             blackboard: Blackboard instance
             settings: Application settings
+            environment_manager: EnvironmentManager for VM/SSH execution
         """
         self.settings = settings or get_settings()
         self.blackboard = blackboard or Blackboard(settings=self.settings)
+        
+        # Environment Manager for executing commands on VM/SSH environments
+        self.environment_manager = environment_manager
         
         # Logging
         self.logger = logging.getLogger("raglox.controller.mission")
@@ -493,7 +498,8 @@ class MissionController:
             # Each specialist gets its own Blackboard instance to avoid connection conflicts
             recon = ReconSpecialist(
                 blackboard=Blackboard(settings=self.settings),
-                settings=self.settings
+                settings=self.settings,
+                environment_manager=self.environment_manager
             )
             await recon.start(mission_id)
             self._specialists["recon"].append(recon)
@@ -535,7 +541,8 @@ class MissionController:
                 blackboard=Blackboard(settings=self.settings),
                 settings=self.settings,
                 use_real_exploits=use_real_exploits,
-                real_exploitation_engine=real_exploitation_engine
+                real_exploitation_engine=real_exploitation_engine,
+                environment_manager=self.environment_manager
             )
             await attack.start(mission_id)
             self._specialists["attack"].append(attack)

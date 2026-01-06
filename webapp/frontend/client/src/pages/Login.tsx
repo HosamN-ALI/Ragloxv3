@@ -1,223 +1,244 @@
 // RAGLOX v3.0 - Login Page
-// Authentication page with username/password form
+// Professional authentication page with email/password form
 
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { Shield, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import { Shield, Eye, EyeOff, Loader2, AlertCircle, Mail, Lock, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/stores/authStore";
-import { AUTH_ENABLED } from "@/lib/config";
+import { authApi } from "@/lib/api";
+import { toast } from "sonner";
 
 export default function Login() {
-    const [, setLocation] = useLocation();
-    const { login, isAuthenticated, isLoading, error, checkAuth, clearError } = useAuth();
+  const [, setLocation] = useLocation();
+  const { isAuthenticated, isLoading, setToken, setUser, clearError, checkAuth } = useAuth();
 
-    // Form state
-    const [username, setUsername] = useState("");
-    const [password, setPassword] = useState("");
-    const [showPassword, setShowPassword] = useState(false);
-    const [formError, setFormError] = useState<string | null>(null);
+  // Form state
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
 
-    // Check if already authenticated
-    useEffect(() => {
-        const check = async () => {
-            const isAuth = await checkAuth();
-            if (isAuth) {
-                setLocation("/");
-            }
-        };
-        check();
-    }, [checkAuth, setLocation]);
-
-    // Redirect if authenticated
-    useEffect(() => {
-        if (isAuthenticated) {
-            setLocation("/");
+  // Check authentication on mount
+  useEffect(() => {
+    const verifyAuth = async () => {
+      try {
+        const authenticated = await checkAuth();
+        if (authenticated) {
+          setLocation("/dashboard");
         }
-    }, [isAuthenticated, setLocation]);
-
-    // Clear errors when form changes
-    useEffect(() => {
-        if (formError) setFormError(null);
-        if (error) clearError();
-    }, [username, password]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setFormError(null);
-
-        // Validation
-        if (!username.trim()) {
-            setFormError("Username is required");
-            return;
-        }
-        if (!password.trim()) {
-            setFormError("Password is required");
-            return;
-        }
-
-        // Attempt login
-        const success = await login({ username: username.trim(), password });
-
-        if (success) {
-            setLocation("/");
-        }
+      } finally {
+        setIsChecking(false);
+      }
     };
+    verifyAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // If auth is disabled, show bypass option
-    if (!AUTH_ENABLED) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-background p-4">
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5 }}
-                >
-                    <Card className="w-full max-w-md">
-                        <CardHeader className="text-center">
-                            <div className="flex justify-center mb-4">
-                                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-                                    <Shield className="w-8 h-8 text-primary" />
-                                </div>
-                            </div>
-                            <CardTitle className="text-2xl">RAGLOX v3.0</CardTitle>
-                            <CardDescription>
-                                Authentication is disabled in development mode
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <Alert className="mb-4">
-                                <AlertCircle className="h-4 w-4" />
-                                <AlertDescription>
-                                    Auth is disabled. Click below to continue as demo user.
-                                </AlertDescription>
-                            </Alert>
-                            <Button
-                                className="w-full"
-                                onClick={() => {
-                                    login({ username: "demo", password: "demo" });
-                                }}
-                            >
-                                Continue as Demo User
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </motion.div>
-            </div>
-        );
+  // Redirect if authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      setLocation("/dashboard");
+    }
+  }, [isAuthenticated, setLocation]);
+
+  // Clear errors when form changes
+  useEffect(() => {
+    if (formError) setFormError(null);
+  }, [email, password]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Show loading while checking authentication
+  if (isChecking) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Shield className="w-12 h-12 text-primary animate-pulse" />
+          <p className="text-muted-foreground">Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+
+    // Validation
+    if (!email.trim()) {
+      setFormError("Email is required");
+      return;
+    }
+    if (!password.trim()) {
+      setFormError("Password is required");
+      return;
     }
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-background p-4">
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="w-full max-w-md"
-            >
-                <Card>
-                    <CardHeader className="text-center">
-                        <div className="flex justify-center mb-4">
-                            <motion.div
-                                className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center"
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                            >
-                                <Shield className="w-8 h-8 text-primary" />
-                            </motion.div>
-                        </div>
-                        <CardTitle className="text-2xl">Welcome to RAGLOX</CardTitle>
-                        <CardDescription>
-                            Sign in to access the security operations platform
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Error Alert */}
-                            {(error || formError) && (
-                                <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: "auto" }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                >
-                                    <Alert variant="destructive">
-                                        <AlertCircle className="h-4 w-4" />
-                                        <AlertDescription>{formError || error}</AlertDescription>
-                                    </Alert>
-                                </motion.div>
-                            )}
+    setIsSubmitting(true);
 
-                            {/* Username Field */}
-                            <div className="space-y-2">
-                                <Label htmlFor="username">Username</Label>
-                                <Input
-                                    id="username"
-                                    type="text"
-                                    placeholder="Enter your username"
-                                    value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
-                                    disabled={isLoading}
-                                    autoComplete="username"
-                                    autoFocus
-                                />
-                            </div>
+    try {
+      const response = await authApi.login({
+        email: email.trim(),
+        password,
+      });
 
-                            {/* Password Field */}
-                            <div className="space-y-2">
-                                <Label htmlFor="password">Password</Label>
-                                <div className="relative">
-                                    <Input
-                                        id="password"
-                                        type={showPassword ? "text" : "password"}
-                                        placeholder="Enter your password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        disabled={isLoading}
-                                        autoComplete="current-password"
-                                        className="pr-10"
-                                    />
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                        onClick={() => setShowPassword(!showPassword)}
-                                        disabled={isLoading}
-                                    >
-                                        {showPassword ? (
-                                            <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                        ) : (
-                                            <Eye className="h-4 w-4 text-muted-foreground" />
-                                        )}
-                                    </Button>
-                                </div>
-                            </div>
+      if (response.access_token) {
+        setToken(response.access_token);
+        setUser(response.user);
+        toast.success("Welcome back!");
+        setLocation("/dashboard");
+      }
+    } catch (error: any) {
+      console.error("Login error:", error);
+      const message = error.message || "Invalid credentials. Please try again.";
+      setFormError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-                            {/* Submit Button */}
-                            <Button type="submit" className="w-full" disabled={isLoading}>
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Signing in...
-                                    </>
-                                ) : (
-                                    "Sign In"
-                                )}
-                            </Button>
-                        </form>
-
-                        {/* Footer */}
-                        <div className="mt-6 text-center text-sm text-muted-foreground">
-                            <p>RAGLOX v3.0 - AI-Powered Security Operations</p>
-                        </div>
-                    </CardContent>
-                </Card>
-            </motion.div>
+  return (
+    <div className="min-h-screen flex flex-col bg-background">
+      {/* Header */}
+      <header className="border-b border-border bg-card">
+        <div className="container flex items-center justify-between h-16">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setLocation("/")}>
+            <Shield className="w-8 h-8 text-primary" />
+            <span className="font-bold text-xl">RAGLOX</span>
+            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded ml-2">
+              v3.0
+            </span>
+          </div>
+          <Button variant="ghost" onClick={() => setLocation("/register")}>
+            Don't have an account? Sign Up
+          </Button>
         </div>
-    );
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="w-full max-w-md"
+        >
+          <Card>
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-4">
+                <motion.div
+                  className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Shield className="w-8 h-8 text-primary" />
+                </motion.div>
+              </div>
+              <CardTitle className="text-2xl">Welcome Back</CardTitle>
+              <CardDescription>
+                Sign in to access your security operations dashboard
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Error Alert */}
+                {formError && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                  >
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{formError}</AlertDescription>
+                    </Alert>
+                  </motion.div>
+                )}
+
+                {/* Email Field */}
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email Address</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="john@example.com"
+                      className="pl-10"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      disabled={isSubmitting}
+                      autoComplete="email"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="pl-10 pr-10"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={isSubmitting}
+                      autoComplete="current-password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                      disabled={isSubmitting}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Signing in...
+                    </>
+                  ) : (
+                    <>
+                      Sign In
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </form>
+
+              {/* Register Link */}
+              <div className="mt-6 text-center text-sm text-muted-foreground">
+                Don't have an account?{" "}
+                <Button variant="link" className="p-0 h-auto" onClick={() => setLocation("/register")}>
+                  Create Account
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+    </div>
+  );
 }

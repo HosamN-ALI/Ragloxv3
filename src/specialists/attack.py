@@ -144,6 +144,7 @@ class AttackSpecialist(BaseSpecialist):
         operational_memory: Optional[OperationalMemory] = None,
         real_exploitation_engine: Optional[RealExploitationEngine] = None,
         use_real_exploits: bool = False,
+        environment_manager: Optional[Any] = None,
     ):
         super().__init__(
             specialist_type=SpecialistType.ATTACK,
@@ -152,7 +153,8 @@ class AttackSpecialist(BaseSpecialist):
             worker_id=worker_id,
             knowledge=knowledge,
             runner=runner,
-            executor_factory=executor_factory
+            executor_factory=executor_factory,
+            environment_manager=environment_manager
         )
         
         # Real Exploitation Engine (NEW - replaces random.random())

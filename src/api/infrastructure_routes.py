@@ -6,7 +6,7 @@ Author: RAGLOX Team
 Version: 3.0.0
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -34,10 +34,12 @@ class SSHConfigRequest(BaseModel):
     """SSH configuration request"""
     host: str = Field(..., description="SSH host")
     port: int = Field(22, description="SSH port")
-    username: str = Field(..., description="SSH username")
+    username: str = Field("root", description="SSH username")
     password: Optional[str] = Field(None, description="SSH password")
-    key_filename: Optional[str] = Field(None, description="Path to SSH private key")
-    passphrase: Optional[str] = Field(None, description="Key passphrase")
+    private_key_path: Optional[str] = Field(None, description="Path to SSH private key file")
+    private_key_content: Optional[str] = Field(None, description="SSH private key content (alternative to path)")
+    key_passphrase: Optional[str] = Field(None, description="Passphrase for private key")
+    timeout: int = Field(30, description="Connection timeout in seconds")
 
 
 class VMConfigRequest(BaseModel):
@@ -117,43 +119,60 @@ class HealthCheckResponse(BaseModel):
 
 
 # ============================================================================
-# Dependencies
+# Dependencies (using app.state for proper dependency injection)
 # ============================================================================
 
-# Global instances (in production, use dependency injection)
-_environment_manager: Optional[EnvironmentManager] = None
+# Global fallback instances
 _agent_executor: Optional[AgentExecutor] = None
 _health_monitor: Optional[HealthMonitor] = None
 
 
-def get_environment_manager() -> EnvironmentManager:
-    """Get environment manager instance"""
-    global _environment_manager
-    if _environment_manager is None:
+def get_environment_manager(request: Request) -> EnvironmentManager:
+    """
+    Get environment manager instance from app.state.
+    
+    This properly integrates with the initialization in main.py
+    which stores the manager in app.state.environment_manager.
+    """
+    manager = getattr(request.app.state, 'environment_manager', None)
+    if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Environment manager not initialized"
+            detail="Environment manager not initialized. Check SSH or Cloud settings."
         )
-    return _environment_manager
+    return manager
 
 
-def get_agent_executor() -> AgentExecutor:
+def get_agent_executor(request: Request) -> AgentExecutor:
     """Get agent executor instance"""
     global _agent_executor
+    # First check if there's one in app.state
+    executor = getattr(request.app.state, 'agent_executor', None)
+    if executor is not None:
+        return executor
+    
+    # Fallback to global instance
     if _agent_executor is None:
         _agent_executor = AgentExecutor()
     return _agent_executor
 
 
-def get_health_monitor() -> HealthMonitor:
-    """Get health monitor instance"""
-    global _health_monitor
-    if _health_monitor is None:
+def get_health_monitor(request: Request) -> HealthMonitor:
+    """Get health monitor instance from app.state"""
+    monitor = getattr(request.app.state, 'health_monitor', None)
+    if monitor is None:
+        # Try to create one if environment manager exists
+        manager = getattr(request.app.state, 'environment_manager', None)
+        if manager is not None:
+            global _health_monitor
+            if _health_monitor is None:
+                _health_monitor = HealthMonitor(manager)
+            return _health_monitor
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Health monitor not initialized"
         )
-    return _health_monitor
+    return monitor
 
 
 # ============================================================================
@@ -162,7 +181,8 @@ def get_health_monitor() -> HealthMonitor:
 
 @router.post("/environments", response_model=EnvironmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_environment(
-    request: CreateEnvironmentRequest,
+    request_body: CreateEnvironmentRequest,
+    http_request: Request,
     manager: EnvironmentManager = Depends(get_environment_manager)
 ):
     """
@@ -174,35 +194,37 @@ async def create_environment(
     try:
         # Convert request to config
         ssh_config = None
-        if request.ssh_config:
+        if request_body.ssh_config:
             ssh_config = SSHConnectionConfig(
-                host=request.ssh_config.host,
-                port=request.ssh_config.port,
-                username=request.ssh_config.username,
-                password=request.ssh_config.password,
-                key_filename=request.ssh_config.key_filename,
-                passphrase=request.ssh_config.passphrase
+                host=request_body.ssh_config.host,
+                port=request_body.ssh_config.port,
+                username=request_body.ssh_config.username,
+                password=request_body.ssh_config.password,
+                private_key_path=request_body.ssh_config.private_key_path,
+                private_key_content=request_body.ssh_config.private_key_content,
+                key_passphrase=request_body.ssh_config.key_passphrase,
+                timeout=request_body.ssh_config.timeout
             )
         
         vm_config = None
-        if request.vm_config:
+        if request_body.vm_config:
             vm_config = VMConfiguration(
-                hostname=request.vm_config.hostname,
-                plan_id=request.vm_config.plan_id,
-                os_id=request.vm_config.os_id,
-                location_id=request.vm_config.location_id,
-                ssh_keys=request.vm_config.ssh_keys,
-                password=request.vm_config.password
+                hostname=request_body.vm_config.hostname,
+                plan_id=request_body.vm_config.plan_id,
+                os_id=request_body.vm_config.os_id,
+                location_id=request_body.vm_config.location_id,
+                ssh_keys=request_body.vm_config.ssh_keys,
+                password=request_body.vm_config.password
             )
         
         config = EnvironmentConfig(
-            environment_type=request.environment_type,
-            name=request.name,
-            user_id=request.user_id,
-            tenant_id=request.tenant_id,
+            environment_type=request_body.environment_type,
+            name=request_body.name,
+            user_id=request_body.user_id,
+            tenant_id=request_body.tenant_id,
             ssh_config=ssh_config,
             vm_config=vm_config,
-            tags=request.tags
+            tags=request_body.tags
         )
         
         # Create environment
@@ -289,7 +311,8 @@ async def reconnect_environment(
 @router.post("/environments/{environment_id}/execute/command", response_model=ExecutionResponse)
 async def execute_command(
     environment_id: str,
-    request: ExecuteCommandRequest,
+    request_body: ExecuteCommandRequest,
+    http_request: Request,
     manager: EnvironmentManager = Depends(get_environment_manager),
     executor: AgentExecutor = Depends(get_agent_executor)
 ):
@@ -310,11 +333,11 @@ async def execute_command(
     # Execute command
     result = await executor.execute_command(
         environment,
-        request.command,
+        request_body.command,
         task_id,
-        timeout=request.timeout,
-        cwd=request.cwd,
-        env=request.env
+        timeout=request_body.timeout,
+        cwd=request_body.cwd,
+        env=request_body.env
     )
     
     return ExecutionResponse(**result.to_dict())
@@ -323,7 +346,8 @@ async def execute_command(
 @router.post("/environments/{environment_id}/execute/script", response_model=ExecutionResponse)
 async def execute_script(
     environment_id: str,
-    request: ExecuteScriptRequest,
+    request_body: ExecuteScriptRequest,
+    http_request: Request,
     manager: EnvironmentManager = Depends(get_environment_manager),
     executor: AgentExecutor = Depends(get_agent_executor)
 ):
@@ -344,11 +368,11 @@ async def execute_script(
     # Execute script
     result = await executor.execute_script(
         environment,
-        request.script_content,
+        request_body.script_content,
         task_id,
-        interpreter=request.interpreter,
-        timeout=request.timeout,
-        env=request.env
+        interpreter=request_body.interpreter,
+        timeout=request_body.timeout,
+        env=request_body.env
     )
     
     return ExecutionResponse(**result.to_dict())

@@ -81,6 +81,7 @@ class ReconSpecialist(BaseSpecialist):
         executor_factory: Optional['ExecutorFactory'] = None,
         intelligence_coordinator: Optional[IntelligenceCoordinator] = None,
         stealth_manager: Optional[StealthManager] = None,
+        environment_manager: Optional[Any] = None,
     ):
         super().__init__(
             specialist_type=SpecialistType.RECON,
@@ -89,7 +90,8 @@ class ReconSpecialist(BaseSpecialist):
             worker_id=worker_id,
             knowledge=knowledge,
             runner=runner,
-            executor_factory=executor_factory
+            executor_factory=executor_factory,
+            environment_manager=environment_manager
         )
         
         # Task types this specialist handles

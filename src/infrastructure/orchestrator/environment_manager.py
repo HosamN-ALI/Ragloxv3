@@ -14,7 +14,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 import uuid
 
-from ..ssh.connection_manager import SSHConnectionManager, SSHConnectionConfig
+from ..ssh import SSHConnectionManager, SSHConnectionConfig, SSHCredentials
 from ..cloud_provider.vm_manager import VMManager, VMConfiguration, VMInstance, VMStatus
 
 

@@ -1,0 +1,3 @@
+
+export OPENAI_BASE_URL="https://www.genspark.ai/api/llm_proxy/v1"
+export OPENAI_API_KEY="gsk-eyJjb2dlbl9pZCI6ICIxODc2MTM2Ny0yNWQ5LTQ3ZmYtOWIwZi01ZDVhNzBiNjQ5NmYiLCAia2V5X2lkIjogIjNkNTUzOTk5LTY4NjktNGMyMy04MDBhLTU5MjRhNmU2ZDdkMSJ9fCOmmYyZt_zGe6c8BhpSlhRndBeQTj9dKSgarjC2q0qR"

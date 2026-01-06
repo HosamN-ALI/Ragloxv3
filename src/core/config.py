@@ -479,6 +479,94 @@ class Settings(BaseSettings):
     )
     
     # ═══════════════════════════════════════════════════════════
+    # OneProvider Cloud Integration
+    # ═══════════════════════════════════════════════════════════
+    oneprovider_enabled: bool = Field(
+        default=False,
+        description="Enable OneProvider cloud integration for VM provisioning"
+    )
+    oneprovider_api_key: str = Field(
+        default="",
+        description="OneProvider API key (Personal API Key)"
+    )
+    oneprovider_client_key: str = Field(
+        default="",
+        description="OneProvider CLIENT key (Secret Key)"
+    )
+    oneprovider_project_uuid: str = Field(
+        default="",
+        description="Default OneProvider project UUID for VM creation"
+    )
+    oneprovider_default_plan: str = Field(
+        default="8GB-2CORE",
+        description="Default VM plan (e.g., 8GB-2CORE, 16GB-4CORE)"
+    )
+    oneprovider_default_os: str = Field(
+        default="ubuntu-22.04",
+        description="Default OS for VM provisioning"
+    )
+    oneprovider_default_location: str = Field(
+        default="us-east",
+        description="Default datacenter location"
+    )
+    oneprovider_vm_timeout: int = Field(
+        default=600,
+        description="Timeout for VM provisioning in seconds (10 minutes)"
+    )
+    oneprovider_max_vms: int = Field(
+        default=10,
+        description="Maximum concurrent VMs per tenant"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # SSH Infrastructure
+    # ═══════════════════════════════════════════════════════════
+    ssh_enabled: bool = Field(
+        default=True,
+        description="Enable SSH infrastructure for remote connections"
+    )
+    ssh_max_connections: int = Field(
+        default=50,
+        description="Maximum concurrent SSH connections"
+    )
+    ssh_default_timeout: int = Field(
+        default=30,
+        description="Default SSH connection timeout in seconds"
+    )
+    ssh_keepalive_interval: int = Field(
+        default=30,
+        description="SSH keepalive interval in seconds"
+    )
+    ssh_key_directory: str = Field(
+        default="data/ssh_keys",
+        description="Directory for SSH key storage"
+    )
+    ssh_known_hosts_file: str = Field(
+        default="data/known_hosts",
+        description="SSH known hosts file path"
+    )
+    ssh_auto_add_host_keys: bool = Field(
+        default=True,
+        description="Automatically add host keys (development only)"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
+    # Agent Environment Configuration
+    # ═══════════════════════════════════════════════════════════
+    agent_max_environments_per_user: int = Field(
+        default=10,
+        description="Maximum environments per user"
+    )
+    agent_environment_timeout: int = Field(
+        default=7200,
+        description="Environment inactivity timeout in seconds (2 hours)"
+    )
+    agent_install_script_url: str = Field(
+        default="",
+        description="URL for agent installation script"
+    )
+    
+    # ═══════════════════════════════════════════════════════════
     # LLM Configuration
     # ═══════════════════════════════════════════════════════════
     llm_enabled: bool = Field(
