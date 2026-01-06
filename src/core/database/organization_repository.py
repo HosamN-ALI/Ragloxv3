@@ -82,12 +82,16 @@ class Organization:
     name: str
     slug: str  # URL-friendly identifier (e.g., "acme-corp")
     description: Optional[str] = None
+    owner_email: Optional[str] = None  # Email of organization owner
     
     # Subscription & Billing
     plan: str = "free"
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
     billing_email: Optional[str] = None
+    
+    # Status
+    is_active: bool = True
     
     # Limits (from plan)
     max_users: int = 3
@@ -627,3 +631,57 @@ class OrganizationRepository(BaseRepository[Organization]):
             )
             for row in rows
         ]
+    
+    async def get_pending_invitation_by_code(
+        self,
+        invite_code: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get pending invitation by invite code.
+        
+        Args:
+            invite_code: The invitation token/code
+            
+        Returns:
+            Invitation dict with organization_id, email, role or None
+        """
+        query = """
+            SELECT * FROM organization_invitations
+            WHERE token = $1 AND status = 'pending' AND expires_at > $2
+        """
+        row = await self.pool.fetchrow(query, invite_code, datetime.utcnow())
+        
+        if not row:
+            return None
+        
+        return {
+            "id": row["id"],
+            "organization_id": row["organization_id"],
+            "email": row["email"],
+            "role": row["role"],
+            "invited_by": row["invited_by"],
+            "expires_at": row["expires_at"],
+        }
+    
+    async def accept_invitation_by_code(
+        self,
+        invite_code: str,
+        accepted_by_email: str
+    ) -> bool:
+        """
+        Accept invitation using invite code.
+        
+        Args:
+            invite_code: The invitation token/code
+            accepted_by_email: Email of user accepting
+            
+        Returns:
+            True if accepted successfully
+        """
+        query = """
+            UPDATE organization_invitations
+            SET status = 'accepted', accepted_at = $1
+            WHERE token = $2 AND status = 'pending' AND expires_at > $1
+        """
+        result = await self.pool.execute(query, datetime.utcnow(), invite_code)
+        return "UPDATE 1" in result

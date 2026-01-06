@@ -20,6 +20,7 @@ logger = logging.getLogger("raglox")
 from ..core.blackboard import Blackboard
 from ..core.knowledge import EmbeddedKnowledge, init_knowledge
 from ..controller.mission import MissionController
+from ..core.token_store import TokenStore, init_token_store
 
 # ===================================================================
 # DATABASE: PostgreSQL Connection Pool
@@ -41,6 +42,7 @@ from .infrastructure_routes import router as infrastructure_router
 from .workflow_routes import router as workflow_router
 from .auth_routes import router as auth_router
 from .terminal_routes import router as terminal_router
+from .billing_routes import router as billing_router
 
 # ═══════════════════════════════════════════════════════════════
 # SEC-03 & SEC-04: Security Middleware
@@ -363,6 +365,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     blackboard = Blackboard(settings=settings)
     await blackboard.connect()
     
+    # ===================================================================
+    # TOKEN STORE: Initialize Redis-backed JWT Token Store
+    # ===================================================================
+    try:
+        # Get Redis client from Blackboard (shared connection)
+        redis_client = blackboard._redis if blackboard.is_connected() else None
+        
+        if redis_client:
+            token_store = init_token_store(redis_client)
+            app.state.token_store = token_store
+            logger.info("✅ Token Store initialized (Redis-backed)")
+        else:
+            logger.warning("⚠️ Redis not available - Token Store will use fallback")
+            app.state.token_store = None
+    except Exception as e:
+        logger.error(f"❌ Token Store initialization failed: {e}")
+        app.state.token_store = None
+    
     # Initialize Controller with EnvironmentManager for VM/SSH execution
     controller = MissionController(
         blackboard=blackboard,
@@ -517,6 +537,7 @@ def create_app() -> FastAPI:
     app.include_router(security_router, prefix="/api/v1")  # SEC-03 & SEC-04 endpoints
     app.include_router(infrastructure_router, prefix="/api/v1")  # SSH & Cloud Infrastructure
     app.include_router(workflow_router, prefix="/api/v1")  # Advanced Workflow Orchestration
+    app.include_router(billing_router, prefix="/api/v1")  # SaaS Billing & Subscriptions
     app.include_router(terminal_router)  # Terminal, Commands & Suggestions
     app.include_router(websocket_router)
     
