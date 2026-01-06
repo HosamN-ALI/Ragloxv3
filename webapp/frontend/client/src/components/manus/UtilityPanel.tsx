@@ -295,8 +295,18 @@ interface SettingsContentProps {
   onToggle?: (key: keyof PreferencesState) => void;
 }
 
+interface SettingItem {
+  icon: React.ElementType;
+  label: string;
+  description: string;
+  key: keyof PreferencesState | null;
+  enabled?: boolean;
+  disabled?: boolean;
+  action?: boolean;
+}
+
 function SettingsContent({ preferences, onToggle }: SettingsContentProps) {
-  const settingsSections = [
+  const settingsSections: { title: string; items: SettingItem[] }[] = [
     {
       title: "DISPLAY",
       items: [
@@ -304,21 +314,21 @@ function SettingsContent({ preferences, onToggle }: SettingsContentProps) {
           icon: Eye,
           label: "Live Telemetry",
           description: "Show real-time mission data",
-          key: "liveTelemetry" as keyof PreferencesState,
+          key: "liveTelemetry",
           enabled: preferences.liveTelemetry,
         },
         {
           icon: Info,
           label: "Show Tooltips",
           description: "Display helpful hints on hover",
-          key: "showTooltips" as keyof PreferencesState,
+          key: "showTooltips",
           enabled: preferences.showTooltips,
         },
         {
           icon: Zap,
           label: "Compact Plan View",
           description: "Condensed task list display",
-          key: "compactPlan" as keyof PreferencesState,
+          key: "compactPlan",
           enabled: preferences.compactPlan,
         },
       ],

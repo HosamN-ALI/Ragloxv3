@@ -6,3 +6,8 @@ export { ApprovalCard } from "./ApprovalCard";
 export { AIPlanCard } from "./AIPlanCard";
 export { UtilityPanel } from "./UtilityPanel";
 export { CredentialCard, SessionCard, VulnerabilityCard, TargetCard } from "./ArtifactCard";
+export { ProgressBar } from "./ProgressBar";
+export { PlanView, PlanBadge } from "./PlanView";
+export { PlaybackControls, TimelineBar } from "./PlaybackControls";
+export { FilePreview, FileViewerModal } from "./FilePreview";
+export { SuggestedActions, CompactSuggestions } from "./SuggestedActions";

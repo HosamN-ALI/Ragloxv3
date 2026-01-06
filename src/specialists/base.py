@@ -29,6 +29,7 @@ from ..core.retry_policy import get_retry_manager, RetryPolicy
 # Type hints for executor imports (avoid circular imports)
 if TYPE_CHECKING:
     from ..executors import RXModuleRunner, ExecutorFactory
+    from ..infrastructure.orchestrator import EnvironmentManager
 
 
 class BaseSpecialist(ABC):
@@ -56,7 +57,8 @@ class BaseSpecialist(ABC):
         worker_id: Optional[str] = None,
         knowledge: Optional[EmbeddedKnowledge] = None,
         runner: Optional['RXModuleRunner'] = None,
-        executor_factory: Optional['ExecutorFactory'] = None
+        executor_factory: Optional['ExecutorFactory'] = None,
+        environment_manager: Optional['EnvironmentManager'] = None
     ):
         """
         Initialize the specialist.
@@ -69,6 +71,7 @@ class BaseSpecialist(ABC):
             knowledge: Embedded knowledge base (will use singleton if not provided)
             runner: RXModuleRunner for executing RX modules (injected for testability)
             executor_factory: ExecutorFactory for managing connections (injected for testability)
+            environment_manager: EnvironmentManager for executing commands on VM environments
         """
         self.specialist_type = specialist_type
         self.settings = settings or get_settings()
@@ -81,6 +84,9 @@ class BaseSpecialist(ABC):
         # Execution layer dependencies (lazy-loaded if not provided)
         self._runner = runner
         self._executor_factory = executor_factory
+        
+        # Environment Manager for executing commands on VM environments
+        self._environment_manager = environment_manager
         
         # Logging
         self.logger = logging.getLogger(f"raglox.specialist.{specialist_type.value}")
@@ -1071,6 +1077,93 @@ class BaseSpecialist(ABC):
     def is_real_execution_mode(self) -> bool:
         """Check if specialist is in real execution mode (using Runner)."""
         return self._execution_mode == "real" and self.runner is not None
+    
+    @property
+    def environment_manager(self) -> Optional['EnvironmentManager']:
+        """
+        Get the Environment Manager instance.
+        
+        Returns:
+            EnvironmentManager instance or None if not available
+        """
+        return self._environment_manager
+    
+    def set_environment_manager(self, manager: 'EnvironmentManager') -> None:
+        """
+        Set the Environment Manager instance.
+        
+        Args:
+            manager: EnvironmentManager instance
+        """
+        self._environment_manager = manager
+        self.logger.info(f"Environment Manager set for {self.worker_id}")
+    
+    async def execute_on_environment(
+        self,
+        environment_id: str,
+        command: str,
+        timeout: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Execute a command on a specific environment.
+        
+        This method allows specialists to execute commands on VM/SSH environments
+        managed by the EnvironmentManager.
+        
+        Args:
+            environment_id: ID of the target environment
+            command: Command to execute
+            timeout: Execution timeout in seconds
+            
+        Returns:
+            Execution result dictionary with keys:
+            - success: bool
+            - stdout: str
+            - stderr: str
+            - exit_code: int
+            - error: str (if failed)
+        """
+        if not self._environment_manager:
+            self.logger.warning("EnvironmentManager not available, using simulated execution")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": "",
+                "exit_code": -1,
+                "error": "EnvironmentManager not configured"
+            }
+        
+        try:
+            result = await self._environment_manager.execute_command(
+                environment_id=environment_id,
+                command=command,
+                timeout=timeout
+            )
+            return {
+                "success": result.get("success", False),
+                "stdout": result.get("stdout", ""),
+                "stderr": result.get("stderr", ""),
+                "exit_code": result.get("exit_code", -1),
+                "error": result.get("error", "")
+            }
+        except (ConnectionError, TimeoutError) as e:
+            self.logger.error(f"Connection error executing on {environment_id}: {e}")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": "",
+                "exit_code": -1,
+                "error": f"Connection error: {str(e)}"
+            }
+        except Exception as e:
+            self.logger.error(f"Error executing on environment {environment_id}: {e}")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": "",
+                "exit_code": -1,
+                "error": str(e)
+            }
     
     # ═══════════════════════════════════════════════════════════
     # Knowledge Base Helper Methods

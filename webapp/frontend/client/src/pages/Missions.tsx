@@ -1,7 +1,7 @@
 // RAGLOX v3.0 - Missions Management Page
 // Full integration with backend API for mission management
 
-import { FormEvent, useEffect, useState } from "react";
+import React, { FormEvent, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -127,8 +127,13 @@ export default function Missions() {
     }
   };
 
-  const handleCreateMission = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleCreateMission = async (event?: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+    // Prevent default form submission behavior
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
     console.log("[Missions] handleCreateMission called", newMission);
 
     const trimmedName = newMission.name.trim();
@@ -139,6 +144,12 @@ export default function Missions() {
       toast.error("Missing required fields", {
         description: "Please provide mission name and scope",
       });
+      return;
+    }
+
+    // Prevent double submission
+    if (isCreating) {
+      console.log("[Missions] Already creating mission, ignoring duplicate call");
       return;
     }
 
@@ -317,7 +328,14 @@ export default function Missions() {
                     >
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={isCreating}>
+                    <Button 
+                      type="submit" 
+                      disabled={isCreating}
+                      onClick={(e) => {
+                        console.log("[Missions] Create Mission button clicked");
+                        handleCreateMission(e);
+                      }}
+                    >
                       {isCreating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                       Create Mission
                     </Button>
