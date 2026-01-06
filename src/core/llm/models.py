@@ -383,3 +383,46 @@ class ModuleSelectionResponse(BaseModel):
         default_factory=list,
         description="Warnings about the selection"
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Completion Models (for simple text generation)
+# ═══════════════════════════════════════════════════════════════
+
+class CompletionRequest(BaseModel):
+    """
+    Request for simple text completion.
+    
+    Used by ReconSpecialist and other components for LLM consultation
+    without requiring the full AnalysisRequest structure.
+    """
+    
+    prompt: str = Field(..., description="The prompt to complete")
+    max_tokens: int = Field(500, description="Maximum tokens in response", ge=1, le=4096)
+    temperature: float = Field(0.7, description="Sampling temperature", ge=0.0, le=2.0)
+    system_prompt: Optional[str] = Field(
+        None,
+        description="Optional system prompt to prepend"
+    )
+    stop_sequences: List[str] = Field(
+        default_factory=list,
+        description="Stop sequences to halt generation"
+    )
+
+
+class CompletionResponse(BaseModel):
+    """
+    Response from simple text completion.
+    
+    Provides a simple interface for getting LLM responses without
+    structured output requirements.
+    """
+    
+    success: bool = Field(..., description="Whether completion was successful")
+    content: Optional[str] = Field(None, description="Generated content")
+    error: Optional[str] = Field(None, description="Error message if failed")
+    
+    # Metadata
+    model_used: str = Field("unknown", description="Model used for completion")
+    tokens_used: int = Field(0, description="Total tokens used")
+    latency_ms: float = Field(0.0, description="Completion latency in milliseconds")

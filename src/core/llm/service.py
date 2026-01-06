@@ -29,6 +29,8 @@ from .models import (
     FailureCategory,
     RecommendedAction,
     RootCauseAnalysis,
+    CompletionRequest,
+    CompletionResponse,
 )
 from .prompts import (
     REFLEXION_SYSTEM_PROMPT,
@@ -258,6 +260,67 @@ class LLMService:
         
         self._stats["failed_requests"] += 1
         raise last_error or LLMError("All providers failed")
+    
+    async def complete(
+        self,
+        request: CompletionRequest,
+        provider_name: Optional[str] = None,
+    ) -> CompletionResponse:
+        """
+        Simple text completion.
+        
+        This is a convenience method that wraps generate() for simple
+        text completion requests (used by ReconSpecialist and others).
+        
+        Args:
+            request: CompletionRequest with prompt and parameters
+            provider_name: Specific provider to use (or default)
+            
+        Returns:
+            CompletionResponse with generated content
+        """
+        start_time = datetime.utcnow()
+        
+        try:
+            # Build messages
+            messages = []
+            
+            if request.system_prompt:
+                messages.append(LLMMessage.system(request.system_prompt))
+            
+            messages.append(LLMMessage.user(request.prompt))
+            
+            # Generate response
+            response = await self.generate(
+                messages,
+                provider_name=provider_name,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+            
+            return CompletionResponse(
+                success=True,
+                content=response.content,
+                model_used=response.model,
+                tokens_used=response.usage.total_tokens if response.usage else 0,
+                latency_ms=response.latency_ms,
+            )
+            
+        except LLMError as e:
+            self.logger.error(f"LLM error during completion: {e}")
+            return CompletionResponse(
+                success=False,
+                error=str(e),
+                latency_ms=(datetime.utcnow() - start_time).total_seconds() * 1000,
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Unexpected error during completion: {e}")
+            return CompletionResponse(
+                success=False,
+                error=f"Unexpected error: {e}",
+                latency_ms=(datetime.utcnow() - start_time).total_seconds() * 1000,
+            )
     
     async def generate_json(
         self,

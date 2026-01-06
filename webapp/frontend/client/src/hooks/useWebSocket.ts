@@ -123,7 +123,9 @@ export function useWebSocket(
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
     // Generate a unique ID for deduplication
-    const messageId = `${message.type}-${message.timestamp}-${JSON.stringify(message.data).slice(0, 50)}`;
+    // Handle undefined data gracefully
+    const dataStr = message.data ? JSON.stringify(message.data) : "";
+    const messageId = `${message.type}-${message.timestamp}-${dataStr.slice(0, 50)}`;
     if (processedMessageIds.current.has(messageId)) {
       return; // Skip duplicate messages
     }
@@ -247,11 +249,23 @@ export function useWebSocket(
         setEvents((prev) => [eventCard, ...prev].slice(0, MAX_EVENTS_DISPLAY));
         break;
 
+      case "terminal_output":
+        // Handle dedicated terminal output events
+        {
+          const termData = data as { command?: string; output?: string; status?: string };
+          if (termData.output) {
+            const lines = termData.output.split('\n').filter(line => line.length > 0);
+            setTerminalOutput((prev) => [...prev, ...lines]);
+          }
+          // Don't add terminal_output to events (too noisy)
+        }
+        break;
+
       default:
         // Generic event handling
         setEvents((prev) => [eventCard, ...prev].slice(0, MAX_EVENTS_DISPLAY));
 
-        // Check for terminal output
+        // Check for terminal output in generic events
         if ((data as { output?: string }).output) {
           const output = (data as { output: string }).output;
           setTerminalOutput((prev) => [...prev, ...output.split('\n')]);

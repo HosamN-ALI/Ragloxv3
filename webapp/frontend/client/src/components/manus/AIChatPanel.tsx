@@ -1,6 +1,7 @@
 // RAGLOX v3.0 - AI Chat Panel Component (Manus-style exact)
 // Main chat interface with inline events, knowledge badges, and command pills
 // Updated for real-time WebSocket integration
+// INPUT BOX TRANSITION: Centered initially, moves to bottom after first message
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -23,7 +24,9 @@ import {
   Sparkles,
   ArrowDown,
   Wifi,
-  WifiOff
+  WifiOff,
+  FileText,
+  Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -74,6 +77,11 @@ export function AIChatPanel({
   const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Check if conversation has started (has messages or events)
+  const hasConversationStarted = useMemo(() => {
+    return messages.length > 0 || events.length > 0;
+  }, [messages, events]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -165,6 +173,147 @@ export function AIChatPanel({
   const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
   const hasActivePlan = actualPlanTasks.length > 0;
 
+  // ============================================
+  // INITIAL STATE - Input in Center (Manus-style)
+  // ============================================
+  if (!hasConversationStarted) {
+    return (
+      <div className={cn("flex flex-col h-full overflow-hidden", className)} style={{ backgroundColor: '#1a1a1a' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-foreground">RAGLOX 3.0</span>
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          </div>
+          <div className="flex items-center gap-2">
+            <ConnectionStatusIndicator connectionStatus={connectionStatus} />
+          </div>
+        </div>
+
+        {/* Centered Content - Welcome Screen with Input */}
+        <div className="flex-1 flex flex-col items-center justify-center px-6">
+          <div className="w-full max-w-[600px] text-center">
+            {/* Welcome Title */}
+            <motion.h1 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="text-4xl font-semibold mb-4"
+              style={{ color: '#e8e8e8' }}
+            >
+              What can I do for you?
+            </motion.h1>
+            
+            {/* Subtitle */}
+            <motion.p 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="text-lg mb-8"
+              style={{ color: '#888888' }}
+            >
+              Give RAGLOX a task to work on...
+            </motion.p>
+
+            {/* Centered Input Box */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="mb-6"
+            >
+              <form onSubmit={handleSubmit}>
+                <div
+                  className="chat-input chat-input-centered"
+                  style={{ 
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                    border: '1px solid rgba(255,255,255,0.1)'
+                  }}
+                >
+                  {/* Plus Button */}
+                  <button
+                    type="button"
+                    className="chat-input-btn"
+                    title="Add attachment"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+
+                  {/* Text Input */}
+                  <textarea
+                    ref={inputRef}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Describe your security task..."
+                    className="chat-input-field min-h-[40px] max-h-[200px] py-2"
+                    rows={1}
+                  />
+
+                  {/* Right Icons */}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      className="chat-input-btn"
+                      title="Voice input"
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="submit"
+                      className={cn("chat-input-send", inputValue.trim() && "active")}
+                      disabled={!inputValue.trim()}
+                      title="Send"
+                    >
+                      <ArrowDown className="w-4 h-4 rotate-180" />
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </motion.div>
+
+            {/* Quick Actions - Grid Layout */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+            >
+              <InitialQuickActions onAction={onSendMessage} />
+            </motion.div>
+
+            {/* Connection Status */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+              className="mt-8 flex items-center justify-center gap-2"
+            >
+              {isConnected ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-green-500" />
+                  <span className="text-xs text-green-500">Connected to backend</span>
+                </>
+              ) : connectionStatus === "connecting" ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin text-yellow-500" />
+                  <span className="text-xs text-yellow-500">Connecting...</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                  <span className="text-xs text-yellow-500">Ready to connect</span>
+                </>
+              )}
+            </motion.div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================
+  // ACTIVE STATE - Input at Bottom (After conversation starts)
+  // ============================================
   return (
     <div className={cn("flex flex-col h-full overflow-hidden", className)} style={{ backgroundColor: '#1a1a1a' }}>
       {/* Chat Header - Manus style */}
@@ -174,39 +323,7 @@ export function AIChatPanel({
           <ChevronDown className="w-4 h-4 text-muted-foreground" />
         </div>
         <div className="flex items-center gap-2">
-          {/* Connection Status Indicator */}
-          <div className="flex items-center gap-1.5">
-            {connectionStatus === "connected" ? (
-              <>
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{
-                    background: '#4ade80',
-                    boxShadow: '0 0 6px rgba(74, 222, 128, 0.5)'
-                  }}
-                />
-                <span className="text-xs" style={{ color: '#4ade80' }}>Live</span>
-              </>
-            ) : connectionStatus === "connecting" ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" style={{ color: '#f59e0b' }} />
-                <span className="text-xs" style={{ color: '#f59e0b' }}>Connecting...</span>
-              </>
-            ) : connectionStatus === "disabled" ? (
-              <>
-                <WifiOff className="w-3 h-3" style={{ color: '#888888' }} />
-                <span className="text-xs" style={{ color: '#888888' }}>Demo Mode</span>
-              </>
-            ) : (
-              <>
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ background: '#ef4444' }}
-                />
-                <span className="text-xs" style={{ color: '#ef4444' }}>Offline</span>
-              </>
-            )}
-          </div>
+          <ConnectionStatusIndicator connectionStatus={connectionStatus} />
         </div>
       </div>
 
@@ -214,102 +331,98 @@ export function AIChatPanel({
       <ScrollArea className="flex-1 min-h-0">
         <div className="flex justify-center w-full py-6 pb-40 px-6">
           <div className="w-full max-w-[800px]">
-            {messages.length === 0 && displayEvents.length === 0 ? (
-              <WelcomeScreen onQuickAction={onSendMessage} isConnected={isConnected} />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                {/* Agent Header */}
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: 'rgba(74, 158, 255, 0.15)' }}>
-                    <Brain className="w-4 h-4" style={{ color: '#4a9eff' }} />
-                  </div>
-                  <span className="font-semibold" style={{ color: '#e8e8e8', fontSize: '16px' }}>RAGLOX</span>
-                  <span className="agent-badge">v3.0</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Agent Header */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: 'rgba(74, 158, 255, 0.15)' }}>
+                  <Brain className="w-4 h-4" style={{ color: '#4a9eff' }} />
                 </div>
+                <span className="font-semibold" style={{ color: '#e8e8e8', fontSize: '16px' }}>RAGLOX</span>
+                <span className="agent-badge">v3.0</span>
+              </div>
 
-                {/* Initial Message - only show if no events */}
-                {displayEvents.length === 0 && messages.length > 0 && (
-                  <p className="text-foreground leading-relaxed">
-                    {messages[0]?.content || "Ready to assist with your security operations."}
-                  </p>
-                )}
+              {/* Initial Message - only show if no events */}
+              {displayEvents.length === 0 && messages.length > 0 && (
+                <p className="text-foreground leading-relaxed">
+                  {messages[0]?.content || "Ready to assist with your security operations."}
+                </p>
+              )}
 
-                {/* Event Cards */}
-                {displayEvents.map((event) => {
-                  // HITL Approval Card
-                  if (event.type === "approval_request" && event.approval) {
-                    return (
-                      <ApprovalCard
-                        key={event.id}
-                        approval={event.approval}
-                        onApprove={(actionId, comment) => onApprove?.(actionId, comment)}
-                        onReject={(actionId, reason, comment) => onReject?.(actionId, reason, comment)}
-                      />
-                    );
-                  }
-
-                  // AI-PLAN Card
-                  if (event.type === "ai_plan" && event.aiPlan) {
-                    return (
-                      <AIPlanCard
-                        key={event.id}
-                        data={event.aiPlan}
-                      />
-                    );
-                  }
-
-                  // Artifact Cards
-                  if (event.type === "artifact" && event.artifact) {
-                    return (
-                      <div key={event.id} className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-5 h-5 rounded-full bg-success/20 flex items-center justify-center">
-                            <Check className="w-3 h-3 text-success" />
-                          </div>
-                          <span className="font-medium text-foreground">{event.title}</span>
-                        </div>
-                        {event.description && (
-                          <p className="text-muted-foreground text-sm pl-7">{event.description}</p>
-                        )}
-                        <div className="pl-7">
-                          {event.artifact.type === "credential" && event.artifact.credential && (
-                            <CredentialCard credential={event.artifact.credential} />
-                          )}
-                          {event.artifact.type === "session" && event.artifact.session && (
-                            <SessionCard session={event.artifact.session} />
-                          )}
-                          {event.artifact.type === "vulnerability" && event.artifact.vulnerability && (
-                            <VulnerabilityCard vulnerability={event.artifact.vulnerability} />
-                          )}
-                          {event.artifact.type === "target" && event.artifact.target && (
-                            <TargetCard target={event.artifact.target} />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // Regular Event Card
+              {/* Event Cards */}
+              {displayEvents.map((event) => {
+                // HITL Approval Card
+                if (event.type === "approval_request" && event.approval) {
                   return (
-                    <EventItem
+                    <ApprovalCard
                       key={event.id}
-                      event={event}
-                      isExpanded={!collapsedEvents.has(event.id)}
-                      onToggle={() => toggleEvent(event.id)}
-                      expandedKnowledge={expandedKnowledge}
-                      onToggleKnowledge={toggleKnowledge}
-                      onCommandClick={(cmd) => {
-                        onCommandClick?.(cmd);
-                        onExpandTerminal?.();
-                      }}
-                      onTerminalClick={onExpandTerminal}
+                      approval={event.approval}
+                      onApprove={(actionId, comment) => onApprove?.(actionId, comment)}
+                      onReject={(actionId, reason, comment) => onReject?.(actionId, reason, comment)}
                     />
                   );
-                })}
+                }
 
-                <div ref={messagesEndRef} />
-              </div>
-            )}
+                // AI-PLAN Card
+                if (event.type === "ai_plan" && event.aiPlan) {
+                  return (
+                    <AIPlanCard
+                      key={event.id}
+                      data={event.aiPlan}
+                    />
+                  );
+                }
+
+                // Artifact Cards
+                if (event.type === "artifact" && event.artifact) {
+                  return (
+                    <div key={event.id} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full bg-success/20 flex items-center justify-center">
+                          <Check className="w-3 h-3 text-success" />
+                        </div>
+                        <span className="font-medium text-foreground">{event.title}</span>
+                      </div>
+                      {event.description && (
+                        <p className="text-muted-foreground text-sm pl-7">{event.description}</p>
+                      )}
+                      <div className="pl-7">
+                        {event.artifact.type === "credential" && event.artifact.credential && (
+                          <CredentialCard credential={event.artifact.credential} />
+                        )}
+                        {event.artifact.type === "session" && event.artifact.session && (
+                          <SessionCard session={event.artifact.session} />
+                        )}
+                        {event.artifact.type === "vulnerability" && event.artifact.vulnerability && (
+                          <VulnerabilityCard vulnerability={event.artifact.vulnerability} />
+                        )}
+                        {event.artifact.type === "target" && event.artifact.target && (
+                          <TargetCard target={event.artifact.target} />
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Regular Event Card
+                return (
+                  <EventItem
+                    key={event.id}
+                    event={event}
+                    isExpanded={!collapsedEvents.has(event.id)}
+                    onToggle={() => toggleEvent(event.id)}
+                    expandedKnowledge={expandedKnowledge}
+                    onToggleKnowledge={toggleKnowledge}
+                    onCommandClick={(cmd) => {
+                      onCommandClick?.(cmd);
+                      onExpandTerminal?.();
+                    }}
+                    onTerminalClick={onExpandTerminal}
+                  />
+                );
+              })}
+
+              <div ref={messagesEndRef} />
+            </div>
           </div>
         </div>
       </ScrollArea>
@@ -357,7 +470,7 @@ export function AIChatPanel({
                           <Monitor className="w-4.5 h-4.5" style={{ color: '#4a9eff' }} />
                         </div>
                         <div>
-                          <span className="font-medium text-sm" style={{ color: '#e8e8e8' }}>مظهر الخطة</span>
+                          <span className="font-medium text-sm" style={{ color: '#e8e8e8' }}>Task Progress</span>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <Terminal className="w-3 h-3" style={{ color: '#888888' }} />
                             <span className="text-xs" style={{ color: '#888888' }}>RAGLOX is using Terminal</span>
@@ -446,14 +559,14 @@ export function AIChatPanel({
                   onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(38, 38, 38, 0.9)'}
                 >
                   <Monitor className="w-4 h-4" style={{ color: '#A3A3A3' }} />
-                  <span className="text-sm" style={{ color: '#E5E5E5' }}>مظهر الخطة</span>
+                  <span className="text-sm" style={{ color: '#E5E5E5' }}>Task Progress</span>
                   <span className="text-sm" style={{ color: '#A3A3A3' }}>{completedTasks}/{totalTasks}</span>
                   <ChevronUp className="w-4 h-4" style={{ color: '#A3A3A3' }} />
                 </button>
               </div>
             )}
 
-            {/* Quick Actions Bar - Always Visible */}
+            {/* Quick Actions Bar - Always Visible in active state */}
             <QuickActionsBar onAction={onSendMessage} />
 
             {/* Input Area - Centered with max-width, Balanced Icons */}
@@ -511,7 +624,128 @@ export function AIChatPanel({
   );
 }
 
+// ============================================
+// Connection Status Indicator Component
+// ============================================
+function ConnectionStatusIndicator({ connectionStatus }: { connectionStatus: ConnectionStatus }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {connectionStatus === "connected" ? (
+        <>
+          <div
+            className="w-2 h-2 rounded-full"
+            style={{
+              background: '#4ade80',
+              boxShadow: '0 0 6px rgba(74, 222, 128, 0.5)'
+            }}
+          />
+          <span className="text-xs" style={{ color: '#4ade80' }}>Live</span>
+        </>
+      ) : connectionStatus === "connecting" ? (
+        <>
+          <Loader2 className="w-3 h-3 animate-spin" style={{ color: '#f59e0b' }} />
+          <span className="text-xs" style={{ color: '#f59e0b' }}>Connecting...</span>
+        </>
+      ) : connectionStatus === "disabled" ? (
+        <>
+          <WifiOff className="w-3 h-3" style={{ color: '#888888' }} />
+          <span className="text-xs" style={{ color: '#888888' }}>Demo Mode</span>
+        </>
+      ) : (
+        <>
+          <div
+            className="w-2 h-2 rounded-full"
+            style={{ background: '#ef4444' }}
+          />
+          <span className="text-xs" style={{ color: '#ef4444' }}>Offline</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// Initial Quick Actions (Grid Layout - for Welcome Screen)
+// ============================================
+interface InitialQuickActionsProps {
+  onAction: (action: string) => void;
+}
+
+function InitialQuickActions({ onAction }: InitialQuickActionsProps) {
+  const quickActions = [
+    { 
+      icon: Target, 
+      label: "Start Reconnaissance", 
+      description: "Scan and discover target assets",
+      action: "Start reconnaissance on target",
+      color: "#4a9eff",
+    },
+    { 
+      icon: Shield, 
+      label: "Vulnerability Scan", 
+      description: "Find security weaknesses",
+      action: "Scan for vulnerabilities",
+      color: "#f59e0b",
+    },
+    { 
+      icon: Terminal, 
+      label: "Get Shell Access", 
+      description: "Attempt to establish shell",
+      action: "Attempt to get shell access",
+      color: "#4ade80",
+    },
+    { 
+      icon: Sparkles, 
+      label: "Autonomous Mode", 
+      description: "Let RAGLOX work autonomously",
+      action: "Run in autonomous mode",
+      color: "#a78bfa",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {quickActions.map((action) => (
+        <button
+          key={action.label}
+          onClick={() => onAction(action.action)}
+          className="flex items-start gap-3 p-4 rounded-xl text-left transition-all duration-200 group"
+          style={{ 
+            background: 'rgba(38, 38, 38, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.06)'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(48, 48, 48, 0.8)';
+            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(38, 38, 38, 0.6)';
+            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)';
+          }}
+        >
+          <div 
+            className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors"
+            style={{ background: `${action.color}15` }}
+          >
+            <action.icon className="w-5 h-5" style={{ color: action.color }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-medium block" style={{ color: '#e8e8e8' }}>
+              {action.label}
+            </span>
+            <span className="text-xs block mt-0.5" style={{ color: '#666666' }}>
+              {action.description}
+            </span>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ============================================
 // Event Item Component - Manus style
+// ============================================
 interface EventItemProps {
   event: EventCardType;
   isExpanded: boolean;
@@ -650,46 +884,9 @@ function EventItem({
   );
 }
 
-// Welcome Screen Component
-interface WelcomeScreenProps {
-  onQuickAction: (action: string) => void;
-  isConnected?: boolean;
-}
-
-function WelcomeScreen({ onQuickAction, isConnected = false }: WelcomeScreenProps) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-      <h1 className="text-3xl font-semibold text-foreground mb-3">
-        What can I do for you?
-      </h1>
-      <p className="text-muted-foreground mb-2">
-        RAGLOX is ready to assist with your security operations
-      </p>
-
-      {/* Connection status hint */}
-      <div className="flex items-center gap-2 mb-6">
-        {isConnected ? (
-          <>
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-xs text-green-500">Connected to backend</span>
-          </>
-        ) : (
-          <>
-            <div className="w-2 h-2 rounded-full bg-yellow-500" />
-            <span className="text-xs text-yellow-500">Connecting to backend...</span>
-          </>
-        )}
-      </div>
-
-      {/* Instructions */}
-      <p className="text-xs text-muted-foreground max-w-md">
-        Use the quick actions below the input box or type your command to get started.
-      </p>
-    </div>
-  );
-}
-
-// Quick Actions Bar Component - Always visible above input
+// ============================================
+// Quick Actions Bar Component - Always visible above input (Active State)
+// ============================================
 interface QuickActionsBarProps {
   onAction: (action: string) => void;
 }

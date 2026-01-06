@@ -62,7 +62,8 @@ class MissionController:
     def __init__(
         self,
         blackboard: Optional[Blackboard] = None,
-        settings: Optional[Settings] = None
+        settings: Optional[Settings] = None,
+        environment_manager: Optional[Any] = None
     ):
         """
         Initialize the Mission Controller.
@@ -70,9 +71,13 @@ class MissionController:
         Args:
             blackboard: Blackboard instance
             settings: Application settings
+            environment_manager: EnvironmentManager for VM/SSH execution
         """
         self.settings = settings or get_settings()
         self.blackboard = blackboard or Blackboard(settings=self.settings)
+        
+        # Environment Manager for executing commands on VM/SSH environments
+        self.environment_manager = environment_manager
         
         # Logging
         self.logger = logging.getLogger("raglox.controller.mission")
@@ -153,17 +158,24 @@ class MissionController:
     # Mission Lifecycle
     # ═══════════════════════════════════════════════════════════
     
-    async def create_mission(self, mission_data: MissionCreate) -> str:
+    async def create_mission(
+        self,
+        mission_data: MissionCreate,
+        organization_id: Optional[str] = None,
+        created_by: Optional[str] = None
+    ) -> str:
         """
         Create a new mission.
         
         Args:
             mission_data: Mission creation data
+            organization_id: Organization ID for multi-tenant isolation (SaaS)
+            created_by: User ID who created the mission
             
         Returns:
             Mission ID
         """
-        self.logger.info(f"Creating mission: {mission_data.name}")
+        self.logger.info(f"Creating mission: {mission_data.name} for org: {organization_id}")
         
         # Connect to Blackboard if needed
         if not await self.blackboard.health_check():
@@ -174,28 +186,37 @@ class MissionController:
             goal: GoalStatus.PENDING for goal in mission_data.goals
         }
         
-        # Create Mission object
+        # Convert organization_id and created_by to UUID if provided
+        from uuid import UUID
+        org_uuid = UUID(organization_id) if organization_id else None
+        user_uuid = UUID(created_by) if created_by else None
+        
+        # Create Mission object with organization ownership
         mission = Mission(
             name=mission_data.name,
             description=mission_data.description,
             scope=mission_data.scope,
             goals=goals_dict,
             constraints=mission_data.constraints,
-            status=MissionStatus.CREATED
+            status=MissionStatus.CREATED,
+            organization_id=org_uuid,
+            created_by=user_uuid
         )
         
         # Store in Blackboard
         mission_id = await self.blackboard.create_mission(mission)
         
-        # Track locally
+        # Track locally with organization info
         self._active_missions[mission_id] = {
             "mission": mission,
             "status": MissionStatus.CREATED,
             "specialists": [],
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow(),
+            "organization_id": organization_id,
+            "created_by": created_by
         }
         
-        self.logger.info(f"Mission created: {mission_id}")
+        self.logger.info(f"Mission created: {mission_id} (org: {organization_id})")
         return mission_id
     
     async def start_mission(self, mission_id: str) -> bool:
@@ -435,7 +456,10 @@ class MissionController:
                         "vuln_count": 0,
                         "created_at": local_mission.get("created_at", datetime.utcnow()).isoformat() if hasattr(local_mission.get("created_at"), 'isoformat') else str(local_mission.get("created_at")),
                         "started_at": None,
-                        "completed_at": None
+                        "completed_at": None,
+                        # SaaS Multi-tenancy fields
+                        "organization_id": local_mission.get("organization_id"),
+                        "created_by": local_mission.get("created_by")
                     }
             return None
         
@@ -468,7 +492,10 @@ class MissionController:
             "vuln_count": len(vulns),
             "created_at": mission_data.get("created_at"),
             "started_at": mission_data.get("started_at"),
-            "completed_at": mission_data.get("completed_at")
+            "completed_at": mission_data.get("completed_at"),
+            # SaaS Multi-tenancy fields
+            "organization_id": mission_data.get("organization_id"),
+            "created_by": mission_data.get("created_by")
         }
     
     # ═══════════════════════════════════════════════════════════
@@ -493,7 +520,8 @@ class MissionController:
             # Each specialist gets its own Blackboard instance to avoid connection conflicts
             recon = ReconSpecialist(
                 blackboard=Blackboard(settings=self.settings),
-                settings=self.settings
+                settings=self.settings,
+                environment_manager=self.environment_manager
             )
             await recon.start(mission_id)
             self._specialists["recon"].append(recon)
@@ -535,7 +563,8 @@ class MissionController:
                 blackboard=Blackboard(settings=self.settings),
                 settings=self.settings,
                 use_real_exploits=use_real_exploits,
-                real_exploitation_engine=real_exploitation_engine
+                real_exploitation_engine=real_exploitation_engine,
+                environment_manager=self.environment_manager
             )
             await attack.start(mission_id)
             self._specialists["attack"].append(attack)
@@ -802,9 +831,28 @@ class MissionController:
     # Utility Methods
     # ═══════════════════════════════════════════════════════════
     
-    async def get_active_missions(self) -> List[str]:
-        """Get list of active mission IDs."""
-        return list(self._active_missions.keys())
+    async def get_active_missions(self, organization_id: Optional[str] = None) -> List[str]:
+        """
+        Get list of active mission IDs.
+        
+        Args:
+            organization_id: Optional organization ID for filtering (SaaS multi-tenancy)
+            
+        Returns:
+            List of mission IDs belonging to the specified organization,
+            or all missions if organization_id is None
+        """
+        if organization_id is None:
+            return list(self._active_missions.keys())
+        
+        # Filter by organization_id
+        filtered_missions = []
+        for mission_id, mission_data in self._active_missions.items():
+            mission_org_id = mission_data.get("organization_id")
+            if mission_org_id == organization_id:
+                filtered_missions.append(mission_id)
+        
+        return filtered_missions
     
     # ═══════════════════════════════════════════════════════════
     # HITL (Human-in-the-Loop) Methods
@@ -1296,7 +1344,7 @@ class MissionController:
             except Exception as e:
                 self.logger.warning(f"Failed to persist response to Redis: {e}")
             
-            # Publish response event
+            # Publish response event via Blackboard Pub/Sub
             response_event = ChatEvent(
                 mission_id=UUID(mission_id),
                 message_id=response.id,
@@ -1309,8 +1357,27 @@ class MissionController:
                 await self.blackboard.publish(channel, response_event)
             else:
                 await self.blackboard.publish_dict(channel, response_event.model_dump())
+            
+            # REAL-TIME: Broadcast AI response via WebSocket for instant delivery
+            # This ensures the frontend receives the response immediately
+            # Use lazy import to avoid circular dependency
+            try:
+                from ..api.websocket import broadcast_chat_message
+                await broadcast_chat_message(
+                    mission_id=mission_id,
+                    message_id=str(response.id),
+                    role=response.role,
+                    content=response.content,
+                    related_task_id=str(response.related_task_id) if response.related_task_id else None,
+                    related_action_id=str(response.related_action_id) if response.related_action_id else None
+                )
+                self.logger.info(f"📡 Chat response broadcast via WebSocket for mission {mission_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to broadcast chat message via WebSocket: {e}")
         
-        return message
+        # Return AI response if available, otherwise return user message
+        # HTTP response serves as fallback when WebSocket is not available
+        return response if response else message
     
     async def get_chat_history(self, mission_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
@@ -1371,10 +1438,133 @@ class MissionController:
         Uses LLM for intelligent responses with fallback to simple commands.
         """
         content = message.content.lower()
+        original_content = message.content
         response_content = None
         
-        # Check for simple commands first (fast path)
-        if "status" in content:
+        # ═══════════════════════════════════════════════════════════════
+        # SHELL ACCESS & COMMAND EXECUTION DETECTION
+        # ═══════════════════════════════════════════════════════════════
+        
+        # Detect shell/terminal access requests
+        shell_keywords = ["shell", "terminal", "ssh", "access", "connect", "وصول", "طرفية"]
+        run_keywords = ["run", "execute", "نفذ", "شغل"]
+        
+        is_shell_request = any(kw in content for kw in shell_keywords)
+        is_run_request = any(kw in content for kw in run_keywords)
+        
+        # Extract command if present (e.g., "run ls -l" or "execute whoami")
+        extracted_command = None
+        if is_run_request:
+            import re
+            # Match patterns like: "run ls -l", "execute whoami", "run 'nmap -sV target'"
+            cmd_patterns = [
+                r"(?:run|execute|نفذ|شغل)\s+['\"]?([^'\"]+)['\"]?",
+                r"(?:run|execute)\s+(.+)",
+            ]
+            for pattern in cmd_patterns:
+                match = re.search(pattern, original_content, re.IGNORECASE)
+                if match:
+                    extracted_command = match.group(1).strip()
+                    break
+        
+        # Handle shell access request
+        if is_shell_request and "run" not in content and "execute" not in content:
+            response_content = (
+                "🖥️ **Shell Access Available**\n\n"
+                "I can execute commands on the target environment. Here's how to use it:\n\n"
+                "**Execute a command:**\n"
+                "```\n"
+                "run <command>\n"
+                "```\n\n"
+                "**Examples:**\n"
+                "- `run ls -la` - List files\n"
+                "- `run whoami` - Show current user\n"
+                "- `run uname -a` - System information\n"
+                "- `run nmap -sV target` - Scan target\n\n"
+                "The output will appear in the terminal panel on the right. →"
+            )
+            
+            # Broadcast AI plan to show terminal capability
+            try:
+                from ..api.websocket import broadcast_ai_plan, broadcast_terminal_output
+                await broadcast_ai_plan(
+                    mission_id=mission_id,
+                    tasks=[
+                        {"id": "task-1", "title": "Shell access ready", "status": "completed", "order": 1, 
+                         "description": "Terminal connection established"},
+                        {"id": "task-2", "title": "Awaiting command", "status": "running", "order": 2,
+                         "description": "Ready to execute commands"}
+                    ],
+                    message="Shell access is ready",
+                    reasoning="User requested shell access"
+                )
+                await broadcast_terminal_output(
+                    mission_id=mission_id,
+                    command="",
+                    output="ubuntu@raglox:~ $ # Terminal ready. Type 'run <command>' in chat to execute.",
+                    status="ready"
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to broadcast shell ready: {e}")
+        
+        # Handle command execution request
+        elif is_run_request and extracted_command:
+            # Execute the command via terminal_routes
+            command_output_lines = []
+            try:
+                from ..api.websocket import broadcast_terminal_output, broadcast_ai_plan
+                
+                # Broadcast plan showing command execution
+                await broadcast_ai_plan(
+                    mission_id=mission_id,
+                    tasks=[
+                        {"id": "task-exec", "title": f"Execute: {extracted_command[:30]}...", 
+                         "status": "running", "order": 1,
+                         "description": f"Running command: {extracted_command}"}
+                    ],
+                    message=f"Executing command: {extracted_command}",
+                    reasoning=f"User requested to run: {extracted_command}"
+                )
+                
+                # Simulate command execution (in production, use SSHCommandExecutor)
+                command_output = await self._execute_shell_command(mission_id, extracted_command)
+                command_output_lines = command_output.split("\n") if command_output else []
+                
+                response_content = (
+                    f"✅ **Command Executed**\n\n"
+                    f"```\n$ {extracted_command}\n{command_output}\n```\n\n"
+                    "Check the terminal panel for the full output. →"
+                )
+                
+                # Update plan to completed
+                await broadcast_ai_plan(
+                    mission_id=mission_id,
+                    tasks=[
+                        {"id": "task-exec", "title": f"Execute: {extracted_command[:30]}...", 
+                         "status": "completed", "order": 1,
+                         "description": f"Command completed"}
+                    ],
+                    message=f"Command completed: {extracted_command}",
+                    reasoning="Command execution finished"
+                )
+                
+                # Return response with command and output fields populated
+                return ChatMessage(
+                    mission_id=UUID(mission_id),
+                    role="system",
+                    content=response_content,
+                    command=extracted_command,
+                    output=command_output_lines,
+                    related_task_id=message.related_task_id,
+                    related_action_id=message.related_action_id
+                )
+                
+            except Exception as e:
+                self.logger.error(f"Command execution error: {e}")
+                response_content = f"❌ Failed to execute command: {str(e)}"
+        
+        # Check for simple commands (fast path)
+        elif "status" in content:
             status = await self.get_mission_status(mission_id)
             if status:
                 response_content = (
@@ -1404,13 +1594,20 @@ class MissionController:
         
         elif "help" in content or "مساعدة" in content:
             response_content = (
-                "📖 Available commands:\n"
-                "  - 'status': Get mission status\n"
-                "  - 'pause': Pause the mission\n"
-                "  - 'resume': Resume the mission\n"
-                "  - 'pending': List pending approvals\n"
-                "  - 'help': Show this help message\n"
-                "\nYou can also ask me anything about the mission!"
+                "📖 **Available Commands:**\n\n"
+                "**Mission Control:**\n"
+                "  - `status` - Get mission status\n"
+                "  - `pause` - Pause the mission\n"
+                "  - `resume` - Resume the mission\n"
+                "  - `pending` - List pending approvals\n\n"
+                "**Shell Access:**\n"
+                "  - `get shell access` - Open terminal\n"
+                "  - `run <command>` - Execute a command\n\n"
+                "**Examples:**\n"
+                "  - `run ls -la`\n"
+                "  - `run nmap -sV target`\n"
+                "  - `run whoami`\n\n"
+                "You can also ask me anything about the mission!"
             )
         
         else:
@@ -1427,6 +1624,239 @@ class MissionController:
             )
         
         return None
+    
+    async def _execute_shell_command(self, mission_id: str, command: str) -> str:
+        """
+        Execute a shell command on the mission's target environment.
+        
+        Uses the user's VM environment via SSH for real command execution.
+        Falls back to simulation mode if no environment is available.
+        
+        Args:
+            mission_id: Mission ID
+            command: Command to execute
+            
+        Returns:
+            Command output as string
+        """
+        try:
+            from ..api.websocket import broadcast_terminal_output
+            
+            # Broadcast command start
+            await broadcast_terminal_output(
+                mission_id=mission_id,
+                command=command,
+                output=f"$ {command}",
+                status="running"
+            )
+            
+            output_lines = []
+            exit_code = 0
+            executed_via_ssh = False
+            
+            # ═══════════════════════════════════════════════════════════════
+            # REAL EXECUTION: Try to execute via user's VM environment
+            # ═══════════════════════════════════════════════════════════════
+            
+            if self.environment_manager:
+                try:
+                    # Get mission data to find the user who created it
+                    mission_data = await self.blackboard.get_mission(mission_id)
+                    
+                    if mission_data:
+                        user_id = mission_data.get("created_by")
+                        
+                        if user_id:
+                            # Convert UUID to string if needed
+                            user_id_str = str(user_id) if user_id else None
+                            
+                            if user_id_str:
+                                # Get user's environments
+                                user_environments = await self.environment_manager.list_user_environments(user_id_str)
+                                
+                                # ═══════════════════════════════════════════════════════════
+                                # NEW: Create environment from user's VM if none exists
+                                # ═══════════════════════════════════════════════════════════
+                                if not user_environments:
+                                    self.logger.info(f"No environments found for user {user_id_str}, attempting to create from VM metadata")
+                                    
+                                    # Get user data with VM info
+                                    from ..core.database.user_repository import UserRepository
+                                    user_repo = UserRepository(self.blackboard.redis)
+                                    user_data = await user_repo.get(user_id_str)
+                                    
+                                    if user_data and user_data.get("metadata"):
+                                        metadata = user_data["metadata"]
+                                        vm_ip = metadata.get("vm_ip")
+                                        vm_ssh_user = metadata.get("vm_ssh_user", "root")
+                                        vm_ssh_password = metadata.get("vm_ssh_password")
+                                        vm_ssh_port = metadata.get("vm_ssh_port", 22)
+                                        
+                                        if vm_ip and vm_ssh_password:
+                                            # Create environment config
+                                            from ..infrastructure.orchestrator import EnvironmentConfig, EnvironmentType
+                                            from ..infrastructure.ssh import SSHConnectionConfig
+                                            
+                                            ssh_config = SSHConnectionConfig(
+                                                host=vm_ip,
+                                                port=vm_ssh_port,
+                                                username=vm_ssh_user,
+                                                password=vm_ssh_password
+                                            )
+                                            
+                                            env_config = EnvironmentConfig(
+                                                environment_type=EnvironmentType.REMOTE_SSH,
+                                                name=f"User VM - {user_id_str[:8]}",
+                                                ssh_config=ssh_config,
+                                                user_id=user_id_str
+                                            )
+                                            
+                                            # Create and register environment
+                                            try:
+                                                agent_env = await self.environment_manager.create_environment(env_config)
+                                                user_environments = [agent_env]
+                                                self.logger.info(f"Created and connected environment {agent_env.environment_id} for user {user_id_str}")
+                                            except Exception as e:
+                                                self.logger.error(f"Failed to create environment on-the-fly: {e}")
+                                
+                                if user_environments:
+                                    # Use the first available connected environment
+                                    agent_env = None
+                                    for env in user_environments:
+                                        if env.status.value in ["connected", "ready"]:
+                                            agent_env = env
+                                            break
+                                    
+                                    if agent_env and agent_env.ssh_manager and agent_env.connection_id:
+                                        self.logger.info(f"Executing command via SSH on environment {agent_env.environment_id}")
+                                        
+                                        # Import and use AgentExecutor
+                                        from ..infrastructure.orchestrator.agent_executor import AgentExecutor
+                                        
+                                        executor = AgentExecutor()
+                                        task_id = f"cmd-{mission_id[:8]}-{id(command)}"
+                                        
+                                        # Execute the command
+                                        result = await executor.execute_command(
+                                            environment=agent_env,
+                                            command=command,
+                                            task_id=task_id,
+                                            timeout=60
+                                        )
+                                        
+                                        # Process result
+                                        if result.status == "success":
+                                            output_lines = result.stdout.split('\n') if result.stdout else []
+                                            exit_code = result.exit_code
+                                            executed_via_ssh = True
+                                            self.logger.info(f"Command executed successfully via SSH")
+                                        else:
+                                            # Command failed but we got output
+                                            error_output = result.stderr or result.stdout or "Command failed"
+                                            output_lines = error_output.split('\n')
+                                            exit_code = result.exit_code
+                                            executed_via_ssh = True
+                                            self.logger.warning(f"Command failed with exit code {exit_code}")
+                                    else:
+                                        self.logger.warning(f"No connected environment found for user {user_id_str}")
+                                else:
+                                    self.logger.warning(f"No environments found for user {user_id_str}")
+                        else:
+                            self.logger.warning(f"Mission {mission_id} has no created_by user")
+                    else:
+                        self.logger.warning(f"Mission {mission_id} not found")
+                        
+                except Exception as env_error:
+                    self.logger.error(f"Environment execution error: {env_error}")
+                    # Fall through to simulation mode
+            
+            # ═══════════════════════════════════════════════════════════════
+            # FALLBACK: Simulation mode when no VM environment is available
+            # ═══════════════════════════════════════════════════════════════
+            
+            if not executed_via_ssh:
+                self.logger.info(f"Using simulation mode for command: {command}")
+                
+                if command.startswith("ls"):
+                    output_lines = [
+                        "total 24",
+                        "drwxr-xr-x  4 root root 4096 Jan  6 12:00 .",
+                        "drwxr-xr-x 10 root root 4096 Jan  6 12:00 ..",
+                        "-rw-r--r--  1 root root 1024 Jan  6 12:00 config.txt",
+                        "-rwxr-xr-x  1 root root 2048 Jan  6 12:00 start.sh",
+                        "drwxr-xr-x  2 root root 4096 Jan  6 12:00 logs",
+                        "drwxr-xr-x  2 root root 4096 Jan  6 12:00 data",
+                        "",
+                        "[SIMULATION MODE - No VM environment configured]"
+                    ]
+                elif command.startswith("pwd"):
+                    output_lines = ["/home/ubuntu/mission", "", "[SIMULATION MODE]"]
+                elif command.startswith("whoami"):
+                    output_lines = ["ubuntu", "", "[SIMULATION MODE]"]
+                elif command.startswith("id"):
+                    output_lines = ["uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),27(sudo)", "", "[SIMULATION MODE]"]
+                elif command.startswith("uname"):
+                    output_lines = ["Linux raglox-sandbox 5.15.0-91-generic x86_64 GNU/Linux", "", "[SIMULATION MODE]"]
+                elif command.startswith("df"):
+                    output_lines = [
+                        "Filesystem     1K-blocks    Used Available Use% Mounted on",
+                        "/dev/sda1       50000000 5000000  45000000  10% /",
+                        "",
+                        "[SIMULATION MODE]"
+                    ]
+                elif command.startswith("nmap"):
+                    output_lines = [
+                        "Starting Nmap 7.94 ( https://nmap.org )",
+                        "Nmap scan report for target",
+                        "Host is up (0.0010s latency).",
+                        "PORT     STATE SERVICE    VERSION",
+                        "22/tcp   open  ssh        OpenSSH 8.4p1",
+                        "80/tcp   open  http       Apache httpd 2.4.51",
+                        "443/tcp  open  https      nginx 1.21.6",
+                        "Nmap done: 1 IP address (1 host up)",
+                        "",
+                        "[SIMULATION MODE]"
+                    ]
+                elif command.startswith("cat"):
+                    output_lines = [
+                        "# Configuration File",
+                        "hostname=target-server",
+                        "ip=192.168.1.100",
+                        "",
+                        "[SIMULATION MODE]"
+                    ]
+                elif command.startswith("ps"):
+                    output_lines = [
+                        "  PID TTY          TIME CMD",
+                        "    1 ?        00:00:02 systemd",
+                        " 1024 ?        00:00:00 sshd",
+                        " 1025 ?        00:00:01 apache2",
+                        "",
+                        "[SIMULATION MODE]"
+                    ]
+                else:
+                    output_lines = [
+                        f"Command '{command}' executed successfully",
+                        "",
+                        "[SIMULATION MODE - Configure VM environment for real execution]"
+                    ]
+            
+            output = "\n".join(output_lines)
+            
+            # Broadcast final output
+            await broadcast_terminal_output(
+                mission_id=mission_id,
+                command=command,
+                output=f"$ {command}\n{output}",
+                exit_code=exit_code,
+                status="completed"
+            )
+            
+            return output
+            
+        except Exception as e:
+            self.logger.error(f"Shell command execution error: {e}")
+            raise
     
     async def _get_llm_response(self, mission_id: str, user_message: str) -> str:
         """

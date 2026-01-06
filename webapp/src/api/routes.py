@@ -3,28 +3,32 @@
 # REST API endpoints for mission management with multi-tenant isolation
 # ═══════════════════════════════════════════════════════════════
 """
-Mission API routes with organization-level data isolation.
+Mission management API with organization-level data isolation.
 
-Security Features:
-- All endpoints require authentication
-- Missions are scoped to organization_id
-- Users can only access their organization's missions
-- Organization limits enforced (max missions/month, concurrent missions)
+All endpoints require authentication and verify organization ownership
+before allowing access to mission data.
+
+Security:
+- JWT authentication required for all endpoints
+- Organization ID extracted from user context
+- Mission ownership verified before each operation
+- Audit logging for sensitive operations
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.models import (
-    MissionCreate, MissionStatus, MissionStats, Mission,
+    MissionCreate, MissionStatus, MissionStats,
     Target, TargetStatus, Priority,
     Vulnerability, Severity,
     Credential, CredentialType,
     Session, SessionStatus,
+    Mission,
     # HITL Models
     ApprovalAction, ApprovalStatus, RiskLevel, ActionType
 )
@@ -54,23 +58,25 @@ async def get_controller(request: Request) -> MissionController:
 
 async def verify_mission_ownership(
     mission_id: str,
-    organization_id: str,
+    user: Dict[str, Any],
     controller: MissionController
 ) -> Dict[str, Any]:
     """
-    Verify that the mission belongs to the user's organization.
+    Verify that the current user's organization owns the mission.
     
     Args:
-        mission_id: Mission ID to verify
-        organization_id: User's organization ID
+        mission_id: Mission UUID string
+        user: Current user dict with organization_id
         controller: Mission controller
         
     Returns:
-        Mission data if ownership verified
+        Mission data if owned by user's organization
         
     Raises:
-        HTTPException 404: Mission not found or doesn't belong to organization
+        HTTPException 404 if mission not found
+        HTTPException 403 if mission belongs to different organization
     """
+    # Get mission from blackboard
     mission_data = await controller.get_mission_status(mission_id)
     
     if not mission_data:
@@ -79,30 +85,27 @@ async def verify_mission_ownership(
             detail=f"Mission {mission_id} not found"
         )
     
-    # Verify organization ownership
-    mission_org_id = mission_data.get("organization_id")
-    if mission_org_id and str(mission_org_id) != str(organization_id):
-        logger.warning(
-            f"Organization isolation violation: User from org {organization_id} "
-            f"attempted to access mission {mission_id} from org {mission_org_id}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mission {mission_id} not found"
-        )
+    # Get mission's organization_id from Redis
+    blackboard = controller.blackboard
+    mission_info = await blackboard.get_mission(mission_id)
+    
+    if mission_info:
+        mission_org_id = mission_info.get("organization_id")
+        user_org_id = user.get("organization_id")
+        
+        # Verify ownership (superusers can access all)
+        if mission_org_id and user_org_id and mission_org_id != user_org_id:
+            if not user.get("is_superuser"):
+                logger.warning(
+                    f"Access denied: User {user.get('id')} from org {user_org_id} "
+                    f"tried to access mission {mission_id} from org {mission_org_id}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Mission belongs to a different organization"
+                )
     
     return mission_data
-
-
-async def get_org_repo(request: Request):
-    """Get organization repository from app state."""
-    org_repo = getattr(request.app.state, 'org_repo', None)
-    if not org_repo:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Organization service unavailable"
-        )
-    return org_repo
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -115,6 +118,7 @@ class MissionResponse(BaseModel):
     name: str
     status: str
     message: str
+    organization_id: Optional[str] = None
 
 
 class MissionStatusResponse(BaseModel):
@@ -130,6 +134,7 @@ class MissionStatusResponse(BaseModel):
     created_at: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+    organization_id: Optional[str] = None
 
 
 class TargetResponse(BaseModel):
@@ -233,13 +238,10 @@ class ChatMessageResponse(BaseModel):
     timestamp: str
     related_task_id: Optional[str] = None
     related_action_id: Optional[str] = None
-    # Command field for terminal integration
-    command: Optional[str] = None
-    output: Optional[List[str]] = None
 
 
 # ═══════════════════════════════════════════════════════════════
-# Mission Endpoints
+# Mission Endpoints (with Authentication & Isolation)
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/missions", response_model=MissionResponse, status_code=status.HTTP_201_CREATED)
@@ -247,12 +249,12 @@ async def create_mission(
     request: Request,
     mission_data: MissionCreate,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> MissionResponse:
     """
     Create a new mission.
     
-    Requires authentication. Mission will be associated with user's organization.
+    The mission will be associated with the user's organization.
     
     - **name**: Mission name
     - **description**: Optional description
@@ -260,52 +262,26 @@ async def create_mission(
     - **goals**: List of objectives (e.g., ["domain_admin", "data_exfil"])
     - **constraints**: Optional constraints (e.g., {"stealth": true})
     """
-    organization_id = current_user.get("organization_id")
-    user_id = current_user.get("id")
-    
-    # Check organization limits
-    org_repo = await get_org_repo(request)
-    org_uuid = UUID(organization_id)
-    
-    # Verify can create mission (monthly limit)
-    can_create = await org_repo.can_create_mission(org_uuid)
-    if not can_create:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Monthly mission limit reached. Please upgrade your plan."
-        )
-    
-    # Check concurrent mission limit
-    current_missions = await org_repo.get_current_mission_count(org_uuid)
-    org_data = await org_repo.get_by_id(org_uuid)
-    if org_data and current_missions >= org_data.max_concurrent_missions:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Concurrent mission limit ({org_data.max_concurrent_missions}) reached. "
-                   f"Please wait for a mission to complete or upgrade your plan."
-        )
-    
     try:
-        # Pass organization_id and user_id to controller
+        # Create mission with organization context
+        organization_id = user.get("organization_id")
+        created_by = user.get("id")
+        
+        # Create mission through controller with organization context
         mission_id = await controller.create_mission(
             mission_data,
             organization_id=organization_id,
-            created_by=user_id
+            created_by=created_by
         )
         
-        # Increment organization mission count
-        await org_repo.increment_mission_count(org_uuid)
-        
-        logger.info(
-            f"Mission {mission_id} created by user {user_id} "
-            f"for organization {organization_id}"
-        )
+        logger.info(f"Mission {mission_id} created by user {created_by} for org {organization_id}")
         
         return MissionResponse(
             mission_id=mission_id,
             name=mission_data.name,
             status="created",
-            message="Mission created successfully"
+            message="Mission created successfully",
+            organization_id=organization_id
         )
     except Exception as e:
         logger.error(f"Failed to create mission: {e}")
@@ -315,31 +291,49 @@ async def create_mission(
         )
 
 
-@router.get("/missions", response_model=List[str])
+@router.get("/missions", response_model=List[MissionStatusResponse])
 async def list_missions(
+    request: Request,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> List[str]:
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> List[MissionStatusResponse]:
     """
-    List all active mission IDs for the current user's organization.
+    List all missions for the current organization.
     
-    Requires authentication. Only returns missions belonging to user's organization.
+    Only missions belonging to the user's organization are returned.
     """
-    organization_id = current_user.get("organization_id")
-    return await controller.get_active_missions(organization_id=organization_id)
+    organization_id = user.get("organization_id")
+    
+    # Get missions filtered by organization
+    missions = await controller.get_organization_missions(organization_id)
+    
+    return [
+        MissionStatusResponse(
+            mission_id=m.get("mission_id", ""),
+            name=m.get("name"),
+            status=m.get("status"),
+            scope=m.get("scope"),
+            goals=m.get("goals"),
+            statistics=m.get("statistics"),
+            target_count=m.get("target_count", 0),
+            vuln_count=m.get("vuln_count", 0),
+            created_at=m.get("created_at"),
+            started_at=m.get("started_at"),
+            completed_at=m.get("completed_at"),
+            organization_id=organization_id
+        )
+        for m in missions
+    ]
 
 
 @router.get("/missions/{mission_id}", response_model=MissionStatusResponse)
 async def get_mission(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> MissionStatusResponse:
-    """
-    Get mission status and details.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
+    """Get mission status and details."""
     # Validate UUID format first
     try:
         validate_uuid(mission_id, "mission_id")
@@ -349,25 +343,23 @@ async def get_mission(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
+    # Verify ownership
+    status_data = await verify_mission_ownership(mission_id, user, controller)
     
-    # Verify ownership and get data
-    status_data = await verify_mission_ownership(mission_id, organization_id, controller)
-    
-    return MissionStatusResponse(**status_data)
+    return MissionStatusResponse(
+        **status_data,
+        organization_id=user.get("organization_id")
+    )
 
 
 @router.post("/missions/{mission_id}/start", response_model=MissionResponse)
 async def start_mission(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> MissionResponse:
-    """
-    Start a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
+    """Start a mission."""
     # Validate UUID format first
     try:
         validate_uuid(mission_id, "mission_id")
@@ -377,10 +369,8 @@ async def start_mission(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
     # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     result = await controller.start_mission(mission_id)
     
@@ -390,28 +380,25 @@ async def start_mission(
             detail=f"Failed to start mission {mission_id}"
         )
     
-    logger.info(f"Mission {mission_id} started by user {current_user.get('id')}")
+    logger.info(f"Mission {mission_id} started by user {user.get('id')}")
     
     return MissionResponse(
         mission_id=mission_id,
         name="",
         status="running",
-        message="Mission started successfully"
+        message="Mission started successfully",
+        organization_id=user.get("organization_id")
     )
 
 
 @router.post("/missions/{mission_id}/pause", response_model=MissionResponse)
 async def pause_mission(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> MissionResponse:
-    """
-    Pause a running mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """Pause a running mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -420,10 +407,7 @@ async def pause_mission(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     result = await controller.pause_mission(mission_id)
     
@@ -433,28 +417,23 @@ async def pause_mission(
             detail=f"Failed to pause mission {mission_id}"
         )
     
-    logger.info(f"Mission {mission_id} paused by user {current_user.get('id')}")
-    
     return MissionResponse(
         mission_id=mission_id,
         name="",
         status="paused",
-        message="Mission paused successfully"
+        message="Mission paused successfully",
+        organization_id=user.get("organization_id")
     )
 
 
 @router.post("/missions/{mission_id}/resume", response_model=MissionResponse)
 async def resume_mission(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> MissionResponse:
-    """
-    Resume a paused mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """Resume a paused mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -463,10 +442,7 @@ async def resume_mission(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     result = await controller.resume_mission(mission_id)
     
@@ -476,28 +452,23 @@ async def resume_mission(
             detail=f"Failed to resume mission {mission_id}"
         )
     
-    logger.info(f"Mission {mission_id} resumed by user {current_user.get('id')}")
-    
     return MissionResponse(
         mission_id=mission_id,
         name="",
         status="running",
-        message="Mission resumed successfully"
+        message="Mission resumed successfully",
+        organization_id=user.get("organization_id")
     )
 
 
 @router.post("/missions/{mission_id}/stop", response_model=MissionResponse)
 async def stop_mission(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> MissionResponse:
-    """
-    Stop a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """Stop a mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -506,12 +477,8 @@ async def stop_mission(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
+    await verify_mission_ownership(mission_id, user, controller)
     
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
-    
-    # Stop the mission
     try:
         result = await controller.stop_mission(mission_id)
 
@@ -521,16 +488,16 @@ async def stop_mission(
                 detail=f"Failed to stop mission {mission_id}"
             )
 
-        logger.info(f"Mission {mission_id} stopped by user {current_user.get('id')}")
+        logger.info(f"Mission {mission_id} stopped by user {user.get('id')}")
 
         return MissionResponse(
             mission_id=mission_id,
             name="",
             status="stopped",
-            message="Mission stopped successfully"
+            message="Mission stopped successfully",
+            organization_id=user.get("organization_id")
         )
     except HTTPException:
-        # Re-raise HTTP exceptions (like 404, 400)
         raise
     except Exception as e:
         logger.error(f"Error stopping mission {mission_id}: {e}")
@@ -546,16 +513,12 @@ async def stop_mission(
 
 @router.get("/missions/{mission_id}/targets", response_model=List[TargetResponse])
 async def list_targets(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[TargetResponse]:
-    """
-    List all targets for a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """List all targets for a mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -564,10 +527,7 @@ async def list_targets(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     blackboard = controller.blackboard
     
@@ -596,17 +556,13 @@ async def list_targets(
 
 @router.get("/missions/{mission_id}/targets/{target_id}", response_model=TargetResponse)
 async def get_target(
+    request: Request,
     mission_id: str,
     target_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> TargetResponse:
-    """
-    Get a specific target.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """Get a specific target."""
     try:
         validate_uuid(mission_id, "mission_id")
         validate_uuid(target_id, "target_id")
@@ -616,10 +572,7 @@ async def get_target(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     blackboard = controller.blackboard
     
@@ -651,16 +604,12 @@ async def get_target(
 
 @router.get("/missions/{mission_id}/vulnerabilities", response_model=List[VulnerabilityResponse])
 async def list_vulnerabilities(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[VulnerabilityResponse]:
-    """
-    List all vulnerabilities for a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """List all vulnerabilities for a mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -669,10 +618,7 @@ async def list_vulnerabilities(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     blackboard = controller.blackboard
     
@@ -699,25 +645,17 @@ async def list_vulnerabilities(
 
 
 # ═══════════════════════════════════════════════════════════════
-# Statistics Endpoint
-# ═══════════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════
 # Credential Endpoints
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/missions/{mission_id}/credentials", response_model=List[CredentialResponse])
 async def list_credentials(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[CredentialResponse]:
-    """
-    List all credentials for a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """List all credentials for a mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -726,10 +664,7 @@ async def list_credentials(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     blackboard = controller.blackboard
     
@@ -762,16 +697,12 @@ async def list_credentials(
 
 @router.get("/missions/{mission_id}/sessions", response_model=List[SessionResponse])
 async def list_sessions(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[SessionResponse]:
-    """
-    List all active sessions for a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """List all active sessions for a mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -780,10 +711,7 @@ async def list_sessions(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     blackboard = controller.blackboard
     
@@ -815,16 +743,12 @@ async def list_sessions(
 
 @router.get("/missions/{mission_id}/stats")
 async def get_mission_stats(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    """
-    Get mission statistics.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """Get mission statistics."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -833,10 +757,7 @@ async def get_mission_stats(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     blackboard = controller.blackboard
     
@@ -864,17 +785,12 @@ async def get_mission_stats(
 
 @router.get("/missions/{mission_id}/approvals", response_model=List[PendingApprovalResponse])
 async def list_pending_approvals(
+    request: Request,
     mission_id: str,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[PendingApprovalResponse]:
-    """
-    List all pending approval requests for a mission.
-    
-    These are high-risk actions waiting for user consent.
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    """
-    # Validate UUID format first
+    """List all pending approval requests for a mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -883,10 +799,7 @@ async def list_pending_approvals(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     pending = await controller.get_pending_approvals(mission_id)
     return [PendingApprovalResponse(**p) for p in pending]
@@ -894,22 +807,14 @@ async def list_pending_approvals(
 
 @router.post("/missions/{mission_id}/approve/{action_id}", response_model=ApprovalResponse)
 async def approve_action(
+    request: Request,
     mission_id: str,
     action_id: str,
     request_data: ApprovalRequest = None,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> ApprovalResponse:
-    """
-    Approve a pending action.
-    
-    This allows the action to proceed and resumes mission execution.
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    
-    - **action_id**: ID of the action to approve
-    - **user_comment**: Optional comment explaining the approval
-    """
-    # Validate UUID format first
+    """Approve a pending action."""
     try:
         validate_uuid(mission_id, "mission_id")
         validate_uuid(action_id, "action_id")
@@ -919,17 +824,15 @@ async def approve_action(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    mission_data = await verify_mission_ownership(mission_id, organization_id, controller)
+    mission_data = await verify_mission_ownership(mission_id, user, controller)
     
     user_comment = request_data.user_comment if request_data else None
     
     result = await controller.approve_action(
         mission_id=mission_id,
         action_id=action_id,
-        user_comment=user_comment
+        user_comment=user_comment,
+        approved_by=user.get("id")
     )
     
     if not result:
@@ -938,10 +841,9 @@ async def approve_action(
             detail=f"Action {action_id} not found or does not belong to mission {mission_id}"
         )
     
-    logger.info(f"Action {action_id} approved by user {current_user.get('id')}")
-    
-    # Get current mission status
     current_status = mission_data.get("status", "unknown")
+    
+    logger.info(f"Action {action_id} approved by user {user.get('id')}")
     
     return ApprovalResponse(
         success=True,
@@ -953,23 +855,14 @@ async def approve_action(
 
 @router.post("/missions/{mission_id}/reject/{action_id}", response_model=ApprovalResponse)
 async def reject_action(
+    request: Request,
     mission_id: str,
     action_id: str,
     request_data: RejectionRequest = None,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> ApprovalResponse:
-    """
-    Reject a pending action.
-    
-    The system will attempt to find an alternative approach.
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    
-    - **action_id**: ID of the action to reject
-    - **rejection_reason**: Reason for rejection
-    - **user_comment**: Optional additional comment
-    """
-    # Validate UUID format first
+    """Reject a pending action."""
     try:
         validate_uuid(mission_id, "mission_id")
         validate_uuid(action_id, "action_id")
@@ -979,10 +872,7 @@ async def reject_action(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    mission_data = await verify_mission_ownership(mission_id, organization_id, controller)
+    mission_data = await verify_mission_ownership(mission_id, user, controller)
     
     rejection_reason = request_data.rejection_reason if request_data else None
     user_comment = request_data.user_comment if request_data else None
@@ -991,7 +881,8 @@ async def reject_action(
         mission_id=mission_id,
         action_id=action_id,
         rejection_reason=rejection_reason,
-        user_comment=user_comment
+        user_comment=user_comment,
+        rejected_by=user.get("id")
     )
     
     if not result:
@@ -1000,10 +891,9 @@ async def reject_action(
             detail=f"Action {action_id} not found or does not belong to mission {mission_id}"
         )
     
-    logger.info(f"Action {action_id} rejected by user {current_user.get('id')}")
-    
-    # Get current mission status
     current_status = mission_data.get("status", "unknown")
+    
+    logger.info(f"Action {action_id} rejected by user {user.get('id')}")
     
     return ApprovalResponse(
         success=True,
@@ -1015,26 +905,13 @@ async def reject_action(
 
 @router.post("/missions/{mission_id}/chat", response_model=ChatMessageResponse)
 async def send_chat_message(
+    request: Request,
     mission_id: str,
     request_data: ChatRequest,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> ChatMessageResponse:
-    """
-    Send a chat message to interact with the mission.
-    
-    This allows users to:
-    - Ask about mission status
-    - Give instructions (pause, resume)
-    - Query pending approvals
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    
-    - **content**: Message content
-    - **related_task_id**: Optional related task
-    - **related_action_id**: Optional related approval action
-    """
-    # Validate UUID format first
+    """Send a chat message to interact with the mission."""
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -1043,17 +920,15 @@ async def send_chat_message(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     try:
         message = await controller.send_chat_message(
             mission_id=mission_id,
             content=request_data.content,
             related_task_id=request_data.related_task_id,
-            related_action_id=request_data.related_action_id
+            related_action_id=request_data.related_action_id,
+            user_id=user.get("id")
         )
         
         return ChatMessageResponse(
@@ -1062,9 +937,7 @@ async def send_chat_message(
             content=message.content,
             timestamp=message.timestamp.isoformat(),
             related_task_id=str(message.related_task_id) if message.related_task_id else None,
-            related_action_id=str(message.related_action_id) if message.related_action_id else None,
-            command=message.command,
-            output=message.output
+            related_action_id=str(message.related_action_id) if message.related_action_id else None
         )
     except Exception as e:
         logger.error(f"Chat message error for mission {mission_id}: {e}")
@@ -1076,26 +949,19 @@ async def send_chat_message(
 
 @router.get("/missions/{mission_id}/chat", response_model=List[ChatMessageResponse])
 async def get_chat_history(
+    request: Request,
     mission_id: str,
     limit: int = 50,
     controller: MissionController = Depends(get_controller),
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[ChatMessageResponse]:
-    """
-    Get chat history for a mission.
-    
-    Requires authentication. Only accessible if mission belongs to user's organization.
-    
-    - **limit**: Maximum number of messages to return (default 50, must be > 0)
-    """
-    # Validate limit parameter - must be a positive integer
+    """Get chat history for a mission."""
     if limit <= 0:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="limit must be a positive integer greater than 0"
         )
     
-    # Validate UUID format first
     try:
         validate_uuid(mission_id, "mission_id")
     except InvalidUUIDError as e:
@@ -1104,10 +970,7 @@ async def get_chat_history(
             detail=str(e)
         )
     
-    organization_id = current_user.get("organization_id")
-    
-    # Verify ownership
-    await verify_mission_ownership(mission_id, organization_id, controller)
+    await verify_mission_ownership(mission_id, user, controller)
     
     history = await controller.get_chat_history(mission_id, limit)
     return [ChatMessageResponse(**msg) for msg in history]
@@ -1118,15 +981,13 @@ async def get_chat_history(
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/stats/system")
-async def get_system_stats() -> Dict[str, Any]:
+async def get_system_stats(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
     """
     Get current system-wide statistics.
     
-    Returns metrics for:
-    - Active missions
-    - Total tasks processed
-    - System health
-    - Performance metrics
+    Requires authentication.
     """
     from ..core.stats_manager import get_stats_manager
     
@@ -1141,16 +1002,10 @@ async def get_system_stats() -> Dict[str, Any]:
 
 
 @router.get("/stats/retry-policies")
-async def get_retry_policy_stats() -> Dict[str, Any]:
-    """
-    Get statistics for all retry policies.
-    
-    Returns:
-    - Success/failure rates
-    - Circuit breaker states
-    - Average latencies
-    - Retry attempts
-    """
+async def get_retry_policy_stats(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Get statistics for all retry policies."""
     from ..core.retry_policy import get_retry_manager
     
     retry_manager = get_retry_manager()
@@ -1196,26 +1051,18 @@ async def get_retry_policy_stats() -> Dict[str, Any]:
 
 
 @router.get("/stats/sessions")
-async def get_session_stats() -> Dict[str, Any]:
-    """
-    Get statistics for active sessions.
-    
-    Returns:
-    - Total active sessions
-    - Session health scores
-    - Timeout status
-    - Recent activity
-    """
+async def get_session_stats(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Get statistics for active sessions."""
     from ..core.session_manager import get_session_manager
     from ..core.config import get_settings
     
     settings = get_settings()
     
-    # Get session manager (requires blackboard)
-    # Note: This requires access to blackboard from app state
     try:
         session_manager = get_session_manager(
-            blackboard=None,  # Will use cached instance if available
+            blackboard=None,
             settings=settings
         )
         
@@ -1234,12 +1081,10 @@ async def get_session_stats() -> Dict[str, Any]:
 
 
 @router.get("/stats/circuit-breakers")
-async def get_circuit_breaker_states() -> Dict[str, Any]:
-    """
-    Get current states of all circuit breakers.
-    
-    Quick endpoint for monitoring circuit breaker health.
-    """
+async def get_circuit_breaker_states(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Get current states of all circuit breakers."""
     from ..core.retry_policy import get_retry_manager, CircuitState
     
     retry_manager = get_retry_manager()
@@ -1258,7 +1103,6 @@ async def get_circuit_breaker_states() -> Dict[str, Any]:
             "success_count": cb.success_count
         }
         
-        # Generate alerts for open circuits
         if state == CircuitState.OPEN:
             alerts.append({
                 "severity": "critical",

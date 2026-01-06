@@ -253,6 +253,34 @@ class Settings(BaseSettings):
         return True
     
     # ═══════════════════════════════════════════════════════════
+    # Stripe Billing (SaaS)
+    # ═══════════════════════════════════════════════════════════
+    stripe_secret_key: str = Field(
+        default="",
+        description="Stripe API secret key (sk_test_... or sk_live_...)"
+    )
+    stripe_publishable_key: str = Field(
+        default="",
+        description="Stripe publishable key (pk_test_... or pk_live_...)"
+    )
+    stripe_webhook_secret: str = Field(
+        default="",
+        description="Stripe webhook signing secret (whsec_...)"
+    )
+    stripe_enabled: bool = Field(
+        default=True,
+        description="Enable Stripe billing integration"
+    )
+    
+    @property
+    def is_stripe_configured(self) -> bool:
+        """Check if Stripe is properly configured."""
+        return bool(
+            self.stripe_secret_key and
+            self.stripe_secret_key.startswith(("sk_test_", "sk_live_"))
+        )
+    
+    # ═══════════════════════════════════════════════════════════
     # Security
     # ═══════════════════════════════════════════════════════════
     encryption_key: str = Field(

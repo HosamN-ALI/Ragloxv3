@@ -10,6 +10,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status, Query
 from pydantic import BaseModel, Field
 
+from fastapi import Depends, Request
+
 from ..core.workflow_orchestrator import (
     AgentWorkflowOrchestrator,
     WorkflowPhase,
@@ -21,6 +23,40 @@ from ..infrastructure.tools import (
     ToolCategory,
     get_tool_manager,
 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Dependency Injection
+# ═══════════════════════════════════════════════════════════════
+
+async def get_orchestrator(request: Request) -> AgentWorkflowOrchestrator:
+    """
+    Get workflow orchestrator from app state.
+    
+    The orchestrator is initialized once during app startup with a connected
+    Blackboard, ensuring all workflow operations have proper Redis access.
+    """
+    orchestrator = getattr(request.app.state, 'workflow_orchestrator', None)
+    
+    if orchestrator is None:
+        # Fallback: create new orchestrator if not initialized
+        # This should not happen in normal operation
+        from ..core.workflow_orchestrator import AgentWorkflowOrchestrator
+        blackboard = getattr(request.app.state, 'blackboard', None)
+        settings = getattr(request.app.state, 'settings', None)
+        
+        if blackboard is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Blackboard service not available"
+            )
+        
+        orchestrator = AgentWorkflowOrchestrator(
+            blackboard=blackboard,
+            settings=settings
+        )
+    
+    return orchestrator
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -154,7 +190,10 @@ class ToolInstallResultResponse(BaseModel):
     status_code=status.HTTP_201_CREATED,
     summary="Start a new workflow"
 )
-async def start_workflow(request: WorkflowStartRequest):
+async def start_workflow(
+    request: WorkflowStartRequest,
+    orchestrator: AgentWorkflowOrchestrator = Depends(get_orchestrator)
+):
     """
     Start a new advanced workflow for a penetration testing mission.
     
@@ -169,7 +208,6 @@ async def start_workflow(request: WorkflowStartRequest):
     8. Reporting - Generate findings report
     9. Cleanup - Clean up artifacts
     """
-    orchestrator = get_workflow_orchestrator()
     
     # Build environment config
     environment_config = None
@@ -227,9 +265,11 @@ async def start_workflow(request: WorkflowStartRequest):
     response_model=WorkflowStatusResponse,
     summary="Get workflow status"
 )
-async def get_workflow_status(mission_id: str):
+async def get_workflow_status(
+    mission_id: str,
+    orchestrator: AgentWorkflowOrchestrator = Depends(get_orchestrator)
+):
     """Get the current status of a workflow."""
-    orchestrator = get_workflow_orchestrator()
     
     context_data = await orchestrator.get_workflow_status(mission_id)
     
@@ -268,9 +308,11 @@ async def get_workflow_status(mission_id: str):
     response_model=List[PhaseResultResponse],
     summary="Get workflow phase results"
 )
-async def get_workflow_phases(mission_id: str):
+async def get_workflow_phases(
+    mission_id: str,
+    orchestrator: AgentWorkflowOrchestrator = Depends(get_orchestrator)
+):
     """Get detailed results for each completed phase."""
-    orchestrator = get_workflow_orchestrator()
     
     context_data = await orchestrator.get_workflow_status(mission_id)
     
@@ -304,9 +346,11 @@ async def get_workflow_phases(mission_id: str):
     "/{mission_id}/pause",
     summary="Pause workflow"
 )
-async def pause_workflow(mission_id: str):
+async def pause_workflow(
+    mission_id: str,
+    orchestrator: AgentWorkflowOrchestrator = Depends(get_orchestrator)
+):
     """Pause a running workflow."""
-    orchestrator = get_workflow_orchestrator()
     
     success = await orchestrator.pause_workflow(mission_id)
     
@@ -323,9 +367,11 @@ async def pause_workflow(mission_id: str):
     "/{mission_id}/resume",
     summary="Resume workflow"
 )
-async def resume_workflow(mission_id: str):
+async def resume_workflow(
+    mission_id: str,
+    orchestrator: AgentWorkflowOrchestrator = Depends(get_orchestrator)
+):
     """Resume a paused workflow."""
-    orchestrator = get_workflow_orchestrator()
     
     success = await orchestrator.resume_workflow(mission_id)
     
@@ -342,9 +388,11 @@ async def resume_workflow(mission_id: str):
     "/{mission_id}/stop",
     summary="Stop workflow"
 )
-async def stop_workflow(mission_id: str):
+async def stop_workflow(
+    mission_id: str,
+    orchestrator: AgentWorkflowOrchestrator = Depends(get_orchestrator)
+):
     """Stop a workflow completely."""
-    orchestrator = get_workflow_orchestrator()
     
     success = await orchestrator.stop_workflow(mission_id)
     

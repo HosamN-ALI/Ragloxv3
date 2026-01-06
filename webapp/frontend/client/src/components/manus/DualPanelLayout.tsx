@@ -1,6 +1,7 @@
 // RAGLOX v3.0 - Three-Column Layout Component (Manus-style)
 // Layout: Sidebar | Chat Panel | Terminal Panel (when open)
 // Updated for real-time WebSocket integration
+// Enhanced with playback controls and command history
 
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -8,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarUtility } from "./Sidebar";
 import { AIChatPanel } from "./AIChatPanel";
-import { TerminalPanel } from "./TerminalPanel";
+import { TerminalPanel, type CommandHistoryEntry } from "./TerminalPanel";
 import { UtilityPanel } from "./UtilityPanel";
 import type { ChatMessage, EventCard, PlanTask, ConnectionStatus } from "@/types";
 
@@ -44,6 +45,13 @@ interface DualPanelLayoutProps {
   onApprove?: (actionId: string, comment?: string) => void;
   onReject?: (actionId: string, reason?: string, comment?: string) => void;
   onClearTerminal?: () => void;
+  onReplayCommand?: (command: string) => void;
+
+  // Command history for playback
+  commandHistory?: CommandHistoryEntry[];
+  
+  // Enable playback controls
+  enablePlayback?: boolean;
 
   // Sidebar
   showSidebar?: boolean;
@@ -75,6 +83,9 @@ export function DualPanelLayout({
   onApprove,
   onReject,
   onClearTerminal,
+  onReplayCommand,
+  commandHistory = [],
+  enablePlayback = true,
   showSidebar = true,
   showDemoData = false,
   className,
@@ -195,6 +206,9 @@ export function DualPanelLayout({
               connectionStatus={connectionStatus}
               onClose={handleCloseTerminal}
               onClear={onClearTerminal}
+              commandHistory={commandHistory}
+              onReplayCommand={onReplayCommand}
+              enablePlayback={enablePlayback}
               className="h-full"
             />
           </motion.div>

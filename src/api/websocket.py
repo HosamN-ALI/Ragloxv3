@@ -467,6 +467,71 @@ async def broadcast_chat_message(
 
 
 # ═══════════════════════════════════════════════════════════════
+# AI Plan & Terminal Output Broadcasting
+# ═══════════════════════════════════════════════════════════════
+
+async def broadcast_ai_plan(
+    mission_id: str,
+    tasks: List[Dict[str, Any]],
+    message: str = None,
+    reasoning: str = None
+) -> None:
+    """
+    Broadcast AI plan event to frontend.
+    
+    This is used when the AI agent creates or updates a task plan.
+    
+    Args:
+        mission_id: Mission ID
+        tasks: List of task objects with id, title, description, status, order
+        message: Optional message about the plan
+        reasoning: Optional reasoning for the plan
+    """
+    await manager.broadcast_to_mission(mission_id, {
+        "type": "ai_plan",
+        "mission_id": mission_id,
+        "data": {
+            "tasks": tasks,
+            "message": message,
+            "reasoning": reasoning
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+async def broadcast_terminal_output(
+    mission_id: str,
+    command: str = None,
+    output: str = None,
+    exit_code: int = None,
+    status: str = "running"
+) -> None:
+    """
+    Broadcast terminal output event to frontend.
+    
+    This is used when commands are executed on the target VM.
+    
+    Args:
+        mission_id: Mission ID
+        command: The command being executed
+        output: Output text from the command
+        exit_code: Exit code if command completed
+        status: Command status (running, completed, error)
+    """
+    await manager.broadcast_to_mission(mission_id, {
+        "type": "terminal_output",
+        "mission_id": mission_id,
+        "data": {
+            "command": command,
+            "output": output,
+            "exit_code": exit_code,
+            "status": status
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+# ═══════════════════════════════════════════════════════════════
 # INTEGRATION: Real-Time Statistics Streaming
 # ═══════════════════════════════════════════════════════════════
 

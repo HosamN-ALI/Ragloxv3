@@ -186,6 +186,7 @@ class MissionCreate(BaseModel):
     scope: List[str] = Field(..., min_length=1)  # CIDRs, domains, IPs
     goals: List[str] = Field(..., min_length=1)  # Goal names
     constraints: Dict[str, Any] = Field(default_factory=dict)
+    # Note: organization_id is injected from authenticated user, not from request
 
 
 class Mission(BaseEntity):
@@ -208,7 +209,8 @@ class Mission(BaseEntity):
     sessions_established: int = 0
     goals_achieved: int = 0
     
-    # Ownership
+    # Ownership & Multi-tenancy (SaaS)
+    organization_id: Optional[UUID] = None  # Required for data isolation
     created_by: Optional[UUID] = None
 
 
@@ -743,6 +745,10 @@ class ChatMessage(BaseModel):
     # Context
     related_task_id: Optional[UUID] = None
     related_action_id: Optional[UUID] = None
+    
+    # Command execution context (for terminal integration)
+    command: Optional[str] = None
+    output: Optional[List[str]] = None
     
     # Timestamp
     timestamp: datetime = Field(default_factory=datetime.utcnow)

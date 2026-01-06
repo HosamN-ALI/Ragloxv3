@@ -168,6 +168,9 @@ export interface ChatMessage {
   timestamp: string;
   related_task_id?: string;
   related_action_id?: string;
+  // Command execution context (for terminal integration)
+  command?: string;
+  output?: string[];
 }
 
 // ============================================

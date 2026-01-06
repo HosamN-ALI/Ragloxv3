@@ -20,6 +20,19 @@ logger = logging.getLogger("raglox")
 from ..core.blackboard import Blackboard
 from ..core.knowledge import EmbeddedKnowledge, init_knowledge
 from ..controller.mission import MissionController
+from ..core.token_store import TokenStore, init_token_store
+
+# ===================================================================
+# DATABASE: PostgreSQL Connection Pool
+# ===================================================================
+from ..core.database import (
+    init_db_pool,
+    close_db_pool,
+    get_db_pool,
+    UserRepository,
+    OrganizationRepository,
+    MissionRepository,
+)
 from .routes import router
 from .websocket import websocket_router
 from .knowledge_routes import router as knowledge_router
@@ -28,6 +41,8 @@ from .security_routes import router as security_router
 from .infrastructure_routes import router as infrastructure_router
 from .workflow_routes import router as workflow_router
 from .auth_routes import router as auth_router
+from .terminal_routes import router as terminal_router
+from .billing_routes import router as billing_router
 
 # ═══════════════════════════════════════════════════════════════
 # SEC-03 & SEC-04: Security Middleware
@@ -46,6 +61,7 @@ blackboard: Blackboard = None
 controller: MissionController = None
 knowledge: EmbeddedKnowledge = None
 shutdown_manager: ShutdownManager = None
+db_pool = None  # PostgreSQL connection pool
 
 
 def init_llm_service(settings) -> None:
@@ -114,9 +130,46 @@ def init_llm_service(settings) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Application lifespan manager."""
-    global blackboard, controller, knowledge, shutdown_manager
+    global blackboard, controller, knowledge, shutdown_manager, db_pool
     
     settings = get_settings()
+    
+    # ===================================================================
+    # DATABASE: Initialize PostgreSQL Connection Pool
+    # ===================================================================
+    try:
+        logger.info("🗄️ Initializing PostgreSQL Connection Pool...")
+        db_pool = await init_db_pool(
+            database_url=settings.database_url,
+            min_size=5,
+            max_size=settings.db_pool_size or 20,
+        )
+        
+        # Health check
+        health = await db_pool.health_check()
+        if health.get("healthy"):
+            logger.info(f"✅ PostgreSQL Connected: {health.get('version', 'unknown')[:50]}...")
+            logger.info(f"   Pool Size: {health.get('pool_size', 0)} connections")
+        else:
+            logger.warning(f"⚠️ PostgreSQL health check failed: {health.get('error')}")
+            logger.warning("   System will use in-memory fallback where needed")
+        
+        # Initialize repositories
+        app.state.db_pool = db_pool
+        app.state.user_repo = UserRepository(db_pool)
+        app.state.org_repo = OrganizationRepository(db_pool)
+        app.state.mission_repo = MissionRepository(db_pool)
+        
+        logger.info("✅ Database repositories initialized")
+        
+    except Exception as e:
+        logger.error(f"❌ PostgreSQL initialization failed: {e}")
+        logger.warning("   Continuing without PostgreSQL (in-memory mode)")
+        db_pool = None
+        app.state.db_pool = None
+        app.state.user_repo = None
+        app.state.org_repo = None
+        app.state.mission_repo = None
     
     # ═══════════════════════════════════════════════════════════════
     # INTEGRATION: Initialize Shutdown Manager
@@ -142,20 +195,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 ssl=settings.msf_rpc_ssl
             )
             
-            # Test connection
-            if metasploit_adapter.connect():
+            # Test connection (connect is async)
+            if await metasploit_adapter.connect():
                 logger.info("✅ Metasploit RPC Connected Successfully")
-                version = metasploit_adapter.get_version()
-                exploits = metasploit_adapter.list_exploits()
+                version = await metasploit_adapter.get_version()
+                exploits = await metasploit_adapter.list_exploits()
                 logger.info(f"   Metasploit Version: {version}")
                 logger.info(f"   Available Modules: {len(exploits) if exploits else 0}")
                 
                 # Register for graceful shutdown
-                shutdown_manager.register(
+                shutdown_manager.register_component(
                     name="metasploit_adapter",
-                    shutdown_func=metasploit_adapter.disconnect,
+                    component=metasploit_adapter,
                     priority=40,
-                    timeout=10.0
+                    shutdown_timeout=10.0,
+                    shutdown_method="disconnect"
                 )
             else:
                 logger.error("❌ Failed to connect to Metasploit RPC")
@@ -192,11 +246,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
             logger.info(f"   Data Directory: {settings.c2_data_dir}")
             
             # Register for graceful shutdown
-            shutdown_manager.register(
+            shutdown_manager.register_component(
                 name="c2_session_manager",
-                shutdown_func=c2_manager.cleanup_all_sessions,
+                component=c2_manager,
                 priority=35,
-                timeout=15.0
+                shutdown_timeout=15.0,
+                shutdown_method="cleanup_all_sessions"
             )
         except Exception as e:
             logger.error(f"❌ C2 Session Manager initialization failed: {e}")
@@ -252,11 +307,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
             logger.info(f"   Keepalive Interval: {settings.ssh_keepalive_interval}s")
             
             # Register for graceful shutdown
-            shutdown_manager.register(
+            shutdown_manager.register_component(
                 name="ssh_connection_manager",
-                shutdown_func=ssh_manager.shutdown,
+                component=ssh_manager,
                 priority=30,
-                timeout=15.0
+                shutdown_timeout=15.0,
+                shutdown_method="shutdown"
             )
             
         except Exception as e:
@@ -309,8 +365,51 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     blackboard = Blackboard(settings=settings)
     await blackboard.connect()
     
-    # Initialize Controller
-    controller = MissionController(blackboard=blackboard, settings=settings)
+    # ===================================================================
+    # TOKEN STORE: Initialize Redis-backed JWT Token Store
+    # ===================================================================
+    try:
+        # Get Redis client from Blackboard (shared connection)
+        redis_client = blackboard._redis if blackboard.is_connected() else None
+        
+        if redis_client:
+            token_store = init_token_store(redis_client)
+            app.state.token_store = token_store
+            logger.info("✅ Token Store initialized (Redis-backed)")
+        else:
+            logger.warning("⚠️ Redis not available - Token Store will use fallback")
+            app.state.token_store = None
+    except Exception as e:
+        logger.error(f"❌ Token Store initialization failed: {e}")
+        app.state.token_store = None
+    
+    # ===================================================================
+    # Initialize Billing Service (Stripe) - SaaS
+    # ===================================================================
+    try:
+        if settings.stripe_enabled and settings.is_stripe_configured:
+            from ..core.billing.service import init_billing_service
+            billing_service = init_billing_service(
+                stripe_secret_key=settings.stripe_secret_key,
+                stripe_webhook_secret=settings.stripe_webhook_secret,
+                organization_repo=app.state.org_repo,
+            )
+            app.state.billing_service = billing_service
+            logger.info("✅ Billing Service initialized (Stripe)")
+        else:
+            if settings.stripe_enabled:
+                logger.warning("⚠️ Stripe enabled but not configured - billing disabled")
+            app.state.billing_service = None
+    except Exception as e:
+        logger.error(f"❌ Billing Service initialization failed: {e}")
+        app.state.billing_service = None
+    
+    # Initialize Controller with EnvironmentManager for VM/SSH execution
+    controller = MissionController(
+        blackboard=blackboard,
+        settings=settings,
+        environment_manager=environment_manager
+    )
     
     # ═══════════════════════════════════════════════════════════════
     # INTEGRATION: Register components with Shutdown Manager
@@ -330,6 +429,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     app.state.blackboard = blackboard
     app.state.controller = controller
     app.state.shutdown_manager = shutdown_manager
+    
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION: Initialize Workflow Orchestrator
+    # ═══════════════════════════════════════════════════════════════
+    try:
+        from ..core.workflow_orchestrator import AgentWorkflowOrchestrator
+        logger.info("🔄 Initializing Workflow Orchestrator...")
+        
+        # Create orchestrator with CONNECTED blackboard
+        workflow_orchestrator = AgentWorkflowOrchestrator(
+            blackboard=blackboard,  # Already connected
+            settings=settings,
+            knowledge=knowledge
+        )
+        
+        app.state.workflow_orchestrator = workflow_orchestrator
+        logger.info("✅ Workflow Orchestrator initialized with connected Blackboard")
+    except Exception as e:
+        logger.error(f"❌ Workflow Orchestrator initialization failed: {e}")
+        app.state.workflow_orchestrator = None
     
     # ═══════════════════════════════════════════════════════════════
     # INTEGRATION: Setup signal handlers for graceful shutdown
@@ -362,6 +481,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.warning("ShutdownManager not available, using fallback shutdown")
         await controller.shutdown()
         await blackboard.disconnect()
+    
+    # Close PostgreSQL connection pool
+    if db_pool:
+        logger.info("Closing PostgreSQL connection pool...")
+        await close_db_pool()
+        logger.info("✅ PostgreSQL pool closed")
     
     print("✓ RAGLOX shutdown complete")
 
@@ -433,6 +558,8 @@ def create_app() -> FastAPI:
     app.include_router(security_router, prefix="/api/v1")  # SEC-03 & SEC-04 endpoints
     app.include_router(infrastructure_router, prefix="/api/v1")  # SSH & Cloud Infrastructure
     app.include_router(workflow_router, prefix="/api/v1")  # Advanced Workflow Orchestration
+    app.include_router(billing_router, prefix="/api/v1")  # SaaS Billing & Subscriptions
+    app.include_router(terminal_router, prefix="/api/v1")  # Terminal, Commands & Suggestions
     app.include_router(websocket_router)
     
     return app

@@ -1,7 +1,21 @@
 # ═══════════════════════════════════════════════════════════════
-# RAGLOX v3.0 - Authentication Routes
-# Complete authentication system with user management and VM provisioning
+# RAGLOX v3.0 - Authentication Routes (SaaS Edition)
+# PostgreSQL + Redis backed authentication with multi-tenancy
 # ═══════════════════════════════════════════════════════════════
+"""
+Authentication system refactored for SaaS multi-tenancy.
+
+Changes from v2.x:
+- Replaced in-memory UserStore with PostgreSQL UserRepository
+- Replaced in-memory token storage with Redis TokenStore
+- Added organization_id isolation for all operations
+- Added Stripe billing integration hooks
+
+Architecture:
+- PostgreSQL: User data, organizations, persistent storage
+- Redis: JWT tokens, sessions, real-time data
+- Every user belongs to an organization (multi-tenancy)
+"""
 
 import logging
 import secrets
@@ -9,6 +23,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from enum import Enum
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,6 +32,10 @@ import jwt
 import bcrypt
 
 from ..core.config import get_settings
+from ..core.database import UserRepository, OrganizationRepository
+from ..core.database.user_repository import User
+from ..core.database.organization_repository import Organization
+from ..core.token_store import TokenStore, get_token_store, init_token_store
 
 
 logger = logging.getLogger("raglox.api.auth")
@@ -72,7 +91,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=8, max_length=128, description="User password")
     full_name: str = Field(..., min_length=2, max_length=100, description="User full name")
-    organization: Optional[str] = Field(None, max_length=100, description="Organization name")
+    organization_name: Optional[str] = Field(None, max_length=100, description="Organization name (creates new org)")
+    invite_code: Optional[str] = Field(None, description="Invitation code to join existing org")
     vm_config: Optional[VMConfiguration] = Field(default_factory=VMConfiguration, description="VM configuration")
     
     @field_validator("password")
@@ -109,20 +129,20 @@ class UserResponse(BaseModel):
     """User response model"""
     id: str
     email: str
-    full_name: str
-    organization: Optional[str]
-    role: UserRole
-    status: UserStatus
-    vm_status: Optional[VMProvisionStatus]
-    vm_ip: Optional[str]
+    full_name: Optional[str]
+    organization_id: str
+    organization_name: Optional[str] = None
+    role: str
+    status: str
+    vm_status: Optional[str] = None
+    vm_ip: Optional[str] = None
     created_at: datetime
-    last_login: Optional[datetime]
+    last_login: Optional[datetime] = None
 
 
 class UserProfileUpdate(BaseModel):
     """User profile update request"""
     full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    organization: Optional[str] = Field(None, max_length=100)
 
 
 class PasswordChangeRequest(BaseModel):
@@ -146,119 +166,67 @@ class PasswordChangeRequest(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════
-# In-Memory User Store (Production should use PostgreSQL)
+# Helper Functions: Repository Access
 # ═══════════════════════════════════════════════════════════════
 
-class UserStore:
-    """
-    In-memory user store for development.
-    In production, this should be replaced with PostgreSQL/Redis.
-    """
-    
-    def __init__(self):
-        self._users: Dict[str, Dict[str, Any]] = {}
-        self._email_index: Dict[str, str] = {}  # email -> user_id
-        self._tokens: Dict[str, str] = {}  # token -> user_id
-        self._refresh_tokens: Dict[str, str] = {}  # refresh_token -> user_id
-        
-        # Create default admin user
-        self._create_default_admin()
-    
-    def _create_default_admin(self):
-        """Create default admin user for initial access"""
-        settings = get_settings()
-        admin_id = "admin-001"
-        admin_email = "admin@raglox.io"
-        
-        # Hash default password
-        password_hash = bcrypt.hashpw("Admin@123".encode(), bcrypt.gensalt()).decode()
-        
-        self._users[admin_id] = {
-            "id": admin_id,
-            "email": admin_email,
-            "password_hash": password_hash,
-            "full_name": "System Administrator",
-            "organization": "RAGLOX",
-            "role": UserRole.ADMIN,
-            "status": UserStatus.ACTIVE,
-            "vm_status": None,
-            "vm_id": None,
-            "vm_ip": None,
-            "created_at": datetime.utcnow(),
-            "last_login": None,
-            "login_attempts": 0,
-            "locked_until": None,
-        }
-        self._email_index[admin_email] = admin_id
-        
-        logger.info(f"Default admin user created: {admin_email}")
-    
-    def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
-        """Get user by email"""
-        user_id = self._email_index.get(email.lower())
-        if user_id:
-            return self._users.get(user_id)
-        return None
-    
-    def get_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get user by ID"""
-        return self._users.get(user_id)
-    
-    def create(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create new user"""
-        user_id = f"user-{secrets.token_hex(8)}"
-        user_data["id"] = user_id
-        user_data["created_at"] = datetime.utcnow()
-        user_data["last_login"] = None
-        user_data["login_attempts"] = 0
-        user_data["locked_until"] = None
-        
-        self._users[user_id] = user_data
-        self._email_index[user_data["email"].lower()] = user_id
-        
-        return user_data
-    
-    def update(self, user_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Update user"""
-        if user_id not in self._users:
-            return None
-        
-        self._users[user_id].update(updates)
-        return self._users[user_id]
-    
-    def list_all(self) -> List[Dict[str, Any]]:
-        """List all users"""
-        return list(self._users.values())
-    
-    def store_token(self, token: str, user_id: str):
-        """Store active token"""
-        self._tokens[token] = user_id
-    
-    def validate_token(self, token: str) -> Optional[str]:
-        """Validate token and return user_id"""
-        return self._tokens.get(token)
-    
-    def revoke_token(self, token: str):
-        """Revoke token"""
-        self._tokens.pop(token, None)
-    
-    def revoke_all_user_tokens(self, user_id: str):
-        """Revoke all tokens for a user"""
-        tokens_to_remove = [t for t, uid in self._tokens.items() if uid == user_id]
-        for token in tokens_to_remove:
-            del self._tokens[token]
+def get_user_repo(request: Request) -> UserRepository:
+    """Get UserRepository from app state."""
+    repo = getattr(request.app.state, 'user_repo', None)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service unavailable"
+        )
+    return repo
 
 
-# Global user store instance
-user_store = UserStore()
+def get_org_repo(request: Request) -> OrganizationRepository:
+    """Get OrganizationRepository from app state."""
+    repo = getattr(request.app.state, 'org_repo', None)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service unavailable"
+        )
+    return repo
+
+
+async def get_token_store_from_request(request: Request) -> TokenStore:
+    """Get TokenStore from app state."""
+    store = getattr(request.app.state, 'token_store', None)
+    if not store:
+        # Fallback: try to get from global
+        store = get_token_store()
+    if not store:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Token service unavailable"
+        )
+    return store
 
 
 # ═══════════════════════════════════════════════════════════════
 # JWT Utilities
 # ═══════════════════════════════════════════════════════════════
 
-def create_access_token(user_id: str, expires_hours: int = None) -> tuple[str, int]:
-    """Create JWT access token"""
+async def create_access_token(
+    user_id: str,
+    organization_id: str,
+    token_store: TokenStore,
+    expires_hours: int = None
+) -> tuple[str, int]:
+    """
+    Create JWT access token and store in Redis.
+    
+    Args:
+        user_id: User UUID string
+        organization_id: Organization UUID string
+        token_store: Redis token store
+        expires_hours: Token validity in hours
+        
+    Returns:
+        Tuple of (token, expires_in_seconds)
+    """
     settings = get_settings()
     
     if expires_hours is None:
@@ -266,9 +234,11 @@ def create_access_token(user_id: str, expires_hours: int = None) -> tuple[str, i
     
     expires_delta = timedelta(hours=expires_hours)
     expire = datetime.utcnow() + expires_delta
+    expires_seconds = int(expires_delta.total_seconds())
     
     payload = {
         "sub": user_id,
+        "org": organization_id,  # Include org for quick access
         "exp": expire,
         "iat": datetime.utcnow(),
         "type": "access",
@@ -276,14 +246,14 @@ def create_access_token(user_id: str, expires_hours: int = None) -> tuple[str, i
     
     token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     
-    # Store token for validation
-    user_store.store_token(token, user_id)
+    # Store token in Redis
+    await token_store.store_token(token, user_id, expires_seconds)
     
-    return token, int(expires_delta.total_seconds())
+    return token, expires_seconds
 
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decode and validate JWT token"""
+    """Decode and validate JWT token."""
     settings = get_settings()
     
     try:
@@ -302,9 +272,14 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
-    """Get current authenticated user"""
+    """
+    Get current authenticated user.
+    
+    Returns user dict with organization_id for downstream use.
+    """
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -314,8 +289,16 @@ async def get_current_user(
     
     token = credentials.credentials
     
-    # Check if token is valid and not revoked
-    stored_user_id = user_store.validate_token(token)
+    # Get token store
+    token_store = getattr(request.app.state, 'token_store', None) or get_token_store()
+    if not token_store:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable"
+        )
+    
+    # Validate token in Redis
+    stored_user_id = await token_store.validate_token(token)
     if not stored_user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -323,7 +306,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Decode token
+    # Decode JWT
     payload = decode_token(token)
     if not payload:
         raise HTTPException(
@@ -333,7 +316,21 @@ async def get_current_user(
         )
     
     user_id = payload.get("sub")
-    user = user_store.get_by_id(user_id)
+    org_id = payload.get("org")
+    
+    # Get user from PostgreSQL
+    user_repo = get_user_repo(request)
+    
+    try:
+        user_uuid = UUID(user_id)
+        org_uuid = UUID(org_id) if org_id else None
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token data"
+        )
+    
+    user = await user_repo.get_by_id(user_uuid, org_uuid)
     
     if not user:
         raise HTTPException(
@@ -342,51 +339,85 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    if user["status"] == UserStatus.SUSPENDED:
+    if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is suspended",
         )
     
-    if user["status"] == UserStatus.DELETED:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account has been deleted",
-        )
-    
-    return user
+    # Return as dict for compatibility
+    return {
+        "id": str(user.id),
+        "organization_id": str(user.organization_id),
+        "email": user.email,
+        "username": user.username,
+        "full_name": user.full_name,
+        "role": user.role,
+        "is_active": user.is_active,
+        "is_superuser": user.is_superuser,
+        "is_org_owner": user.is_org_owner,
+        "last_login_at": user.last_login_at,
+        "created_at": user.created_at,
+        "metadata": user.metadata or {},
+    }
 
 
 async def get_optional_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Optional[Dict[str, Any]]:
-    """Get current user if authenticated, None otherwise"""
+    """Get current user if authenticated, None otherwise."""
     if not credentials:
         return None
     
     try:
-        return await get_current_user(credentials)
+        return await get_current_user(request, credentials)
     except HTTPException:
         return None
 
 
-def require_role(*roles: UserRole):
-    """Dependency to require specific roles"""
-    async def role_checker(user: Dict[str, Any] = Depends(get_current_user)):
+def require_role(*roles: str):
+    """Dependency to require specific roles."""
+    async def role_checker(
+        request: Request,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+    ):
+        user = await get_current_user(request, credentials)
         if user["role"] not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires one of roles: {[r.value for r in roles]}",
+                detail=f"Requires one of roles: {list(roles)}",
             )
         return user
     return role_checker
+
+
+def require_org_owner():
+    """Dependency to require organization owner."""
+    async def owner_checker(
+        request: Request,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+    ):
+        user = await get_current_user(request, credentials)
+        if not user.get("is_org_owner") and not user.get("is_superuser"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organization owner privileges required",
+            )
+        return user
+    return owner_checker
 
 
 # ═══════════════════════════════════════════════════════════════
 # VM Provisioning (Background Task)
 # ═══════════════════════════════════════════════════════════════
 
-async def provision_user_vm(user_id: str, vm_config: VMConfiguration):
+async def provision_user_vm(
+    user_id: str,
+    organization_id: str,
+    vm_config: VMConfiguration,
+    user_repo: UserRepository
+):
     """
     Background task to provision VM for new user.
     Uses OneProvider integration.
@@ -394,21 +425,22 @@ async def provision_user_vm(user_id: str, vm_config: VMConfiguration):
     logger.info(f"Starting VM provisioning for user {user_id}")
     
     try:
+        user_uuid = UUID(user_id)
+        org_uuid = UUID(organization_id)
+        
         # Update status to provisioning
-        user_store.update(user_id, {
-            "status": UserStatus.PROVISIONING,
-            "vm_status": VMProvisionStatus.CREATING,
-        })
+        await user_repo.update(user_uuid, {
+            "metadata": {"vm_status": VMProvisionStatus.CREATING.value}
+        }, org_uuid)
         
         settings = get_settings()
         
         # Check if OneProvider is enabled
         if not settings.oneprovider_enabled:
             logger.warning("OneProvider not enabled, skipping VM provisioning")
-            user_store.update(user_id, {
-                "status": UserStatus.ACTIVE,
-                "vm_status": None,
-            })
+            await user_repo.update(user_uuid, {
+                "metadata": {"vm_status": None}
+            }, org_uuid)
             return
         
         # Import VM manager
@@ -427,41 +459,55 @@ async def provision_user_vm(user_id: str, vm_config: VMConfiguration):
         )
         
         # Create VM configuration
-        user = user_store.get_by_id(user_id)
         hostname = f"raglox-{user_id[:8]}"
+        
+        # Generate secure password for SSH access
+        import secrets
+        import string
+        vm_password = ''.join(secrets.choice(string.ascii_letters + string.digits + "!@#$%") for _ in range(24))
         
         config = VMConfig(
             hostname=hostname,
             plan_id=vm_config.plan,
             os_id=vm_config.os,
             location_id=vm_config.location,
-            tags={"user_id": user_id, "managed_by": "raglox"},
+            password=vm_password,  # SSH password for VM access
+            tags={"user_id": user_id, "org_id": organization_id, "managed_by": "raglox"},
         )
         
         # Update status
-        user_store.update(user_id, {"vm_status": VMProvisionStatus.CREATING})
+        await user_repo.update(user_uuid, {
+            "metadata": {"vm_status": VMProvisionStatus.CREATING.value}
+        }, org_uuid)
         
         # Create VM
         vm_instance = await vm_manager.create_vm(config)
         
         if vm_instance:
             # Wait for VM to be ready
-            user_store.update(user_id, {"vm_status": VMProvisionStatus.CONFIGURING})
+            await user_repo.update(user_uuid, {
+                "metadata": {"vm_status": VMProvisionStatus.CONFIGURING.value}
+            }, org_uuid)
             
             # Poll for ready state
             for _ in range(60):  # 5 minutes max
                 await asyncio.sleep(5)
-                status = await vm_manager.get_vm_status(vm_instance.vm_id)
-                if status and status.ipv4:
+                vm_status = await vm_manager.get_vm_status(vm_instance.vm_id)
+                if vm_status and vm_status.ipv4:
                     break
             
-            # Update user with VM details
-            user_store.update(user_id, {
-                "status": UserStatus.ACTIVE,
-                "vm_status": VMProvisionStatus.READY,
-                "vm_id": vm_instance.vm_id,
-                "vm_ip": vm_instance.ipv4,
-            })
+            # Update user with VM details including SSH credentials
+            # Note: In production, consider encrypting the password before storage
+            await user_repo.update(user_uuid, {
+                "metadata": {
+                    "vm_status": VMProvisionStatus.READY.value,
+                    "vm_id": vm_instance.vm_id,
+                    "vm_ip": vm_instance.ipv4,
+                    "vm_ssh_user": "root",  # Default SSH user for OneProvider VMs
+                    "vm_ssh_password": vm_password,  # Store password for SSH access
+                    "vm_ssh_port": 22,
+                }
+            }, org_uuid)
             
             logger.info(f"VM provisioned for user {user_id}: {vm_instance.ipv4}")
         else:
@@ -469,10 +515,12 @@ async def provision_user_vm(user_id: str, vm_config: VMConfiguration):
             
     except Exception as e:
         logger.error(f"VM provisioning failed for user {user_id}: {e}")
-        user_store.update(user_id, {
-            "status": UserStatus.ACTIVE,  # Allow access even if VM failed
-            "vm_status": VMProvisionStatus.FAILED,
-        })
+        try:
+            await user_repo.update(UUID(user_id), {
+                "metadata": {"vm_status": VMProvisionStatus.FAILED.value}
+            }, UUID(organization_id))
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -481,103 +529,173 @@ async def provision_user_vm(user_id: str, vm_config: VMConfiguration):
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(
-    request: RegisterRequest,
+    request: Request,
+    data: RegisterRequest,
     background_tasks: BackgroundTasks,
 ):
     """
     Register a new user account.
     
+    - Creates organization if organization_name provided
+    - Joins existing organization if invite_code provided
     - Creates user account
     - Provisions VM in background (8GB RAM, 2 Core by default)
     - Returns access token
     """
-    # Check if email already exists
-    existing = user_store.get_by_email(request.email)
+    user_repo = get_user_repo(request)
+    org_repo = get_org_repo(request)
+    token_store = await get_token_store_from_request(request)
+    
+    # Check if email already exists globally
+    existing = await user_repo.get_by_email_global(data.email)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
         )
     
+    organization_id: UUID
+    org_name: str = "Personal"
+    is_org_owner: bool = False
+    
+    # Determine organization
+    if data.invite_code:
+        # Join existing organization via invite
+        invitation = await org_repo.get_pending_invitation_by_code(data.invite_code)
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired invitation code"
+            )
+        organization_id = invitation["organization_id"]
+        org = await org_repo.get_by_id(organization_id)
+        org_name = org.name if org else "Organization"
+        
+        # Mark invitation as used
+        await org_repo.accept_invitation_by_code(data.invite_code, data.email)
+        
+    elif data.organization_name:
+        # Create new organization
+        org_id = uuid4()
+        new_org = Organization(
+            id=org_id,
+            name=data.organization_name,
+            slug=data.organization_name.lower().replace(" ", "-"),
+            owner_email=data.email,
+            plan="free",
+            is_active=True,
+        )
+        created_org = await org_repo.create(new_org)
+        organization_id = created_org.id
+        org_name = created_org.name
+        is_org_owner = True
+        
+    else:
+        # Create personal organization
+        org_id = uuid4()
+        personal_org = Organization(
+            id=org_id,
+            name=f"{data.full_name}'s Workspace",
+            slug=f"personal-{secrets.token_hex(4)}",
+            owner_email=data.email,
+            plan="free",
+            is_active=True,
+        )
+        created_org = await org_repo.create(personal_org)
+        organization_id = created_org.id
+        org_name = created_org.name
+        is_org_owner = True
+    
     # Hash password
-    password_hash = bcrypt.hashpw(request.password.encode(), bcrypt.gensalt()).decode()
+    password_hash = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     
     # Create user
-    user_data = {
-        "email": request.email.lower(),
-        "password_hash": password_hash,
-        "full_name": request.full_name,
-        "organization": request.organization,
-        "role": UserRole.OPERATOR,  # Default role
-        "status": UserStatus.PENDING,
-        "vm_status": VMProvisionStatus.PENDING,
-        "vm_id": None,
-        "vm_ip": None,
-    }
+    user_id = uuid4()
+    new_user = User(
+        id=user_id,
+        organization_id=organization_id,
+        username=data.email.split("@")[0],
+        email=data.email.lower(),
+        password_hash=password_hash,
+        full_name=data.full_name,
+        role="admin" if is_org_owner else "operator",
+        is_active=True,
+        is_org_owner=is_org_owner,
+        metadata={"vm_status": VMProvisionStatus.PENDING.value},
+    )
     
-    user = user_store.create(user_data)
+    user = await user_repo.create(new_user)
     
     # Create access token
-    access_token, expires_in = create_access_token(user["id"])
+    access_token, expires_in = await create_access_token(
+        str(user.id),
+        str(user.organization_id),
+        token_store
+    )
     
     # Start VM provisioning in background
-    vm_config = request.vm_config or VMConfiguration()
-    background_tasks.add_task(provision_user_vm, user["id"], vm_config)
+    vm_config = data.vm_config or VMConfiguration()
+    background_tasks.add_task(
+        provision_user_vm,
+        str(user.id),
+        str(user.organization_id),
+        vm_config,
+        user_repo
+    )
     
-    logger.info(f"New user registered: {user['email']}")
+    logger.info(f"New user registered: {user.email} in org {org_name}")
     
     return TokenResponse(
         access_token=access_token,
         expires_in=expires_in,
         user=UserResponse(
-            id=user["id"],
-            email=user["email"],
-            full_name=user["full_name"],
-            organization=user["organization"],
-            role=user["role"],
-            status=user["status"],
-            vm_status=user["vm_status"],
-            vm_ip=user["vm_ip"],
-            created_at=user["created_at"],
-            last_login=user["last_login"],
+            id=str(user.id),
+            email=user.email,
+            full_name=user.full_name,
+            organization_id=str(user.organization_id),
+            organization_name=org_name,
+            role=user.role,
+            status="pending",
+            vm_status=user.metadata.get("vm_status") if user.metadata else None,
+            vm_ip=user.metadata.get("vm_ip") if user.metadata else None,
+            created_at=user.created_at or datetime.utcnow(),
+            last_login=None,
         ),
     )
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request: Request, data: LoginRequest):
     """
     Authenticate user and return access token.
     """
-    # Get user by email
-    user = user_store.get_by_email(request.email)
+    user_repo = get_user_repo(request)
+    org_repo = get_org_repo(request)
+    token_store = await get_token_store_from_request(request)
+    
+    # Get user by email (global search for login)
+    user = await user_repo.get_by_email_global(data.email)
     
     if not user:
-        # Use same error message to prevent user enumeration
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
     
     # Check if account is locked
-    if user.get("locked_until") and user["locked_until"] > datetime.utcnow():
+    if user.is_locked():
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail="Account is temporarily locked. Please try again later.",
         )
     
     # Verify password
-    if not bcrypt.checkpw(request.password.encode(), user["password_hash"].encode()):
-        # Increment failed attempts
-        attempts = user.get("login_attempts", 0) + 1
-        updates = {"login_attempts": attempts}
+    if not bcrypt.checkpw(data.password.encode(), user.password_hash.encode()):
+        # Record failed attempt
+        is_locked = await user_repo.record_failed_login(user.id)
         
-        # Lock account after 5 failed attempts
-        if attempts >= 5:
-            updates["locked_until"] = datetime.utcnow() + timedelta(minutes=15)
-            logger.warning(f"Account locked due to failed attempts: {user['email']}")
-        
-        user_store.update(user["id"], updates)
+        if is_locked:
+            logger.warning(f"Account locked due to failed attempts: {user.email}")
         
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -585,44 +703,45 @@ async def login(request: LoginRequest):
         )
     
     # Check account status
-    if user["status"] == UserStatus.SUSPENDED:
+    if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is suspended. Please contact support.",
         )
     
-    if user["status"] == UserStatus.DELETED:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account has been deleted",
-        )
+    # Record successful login
+    client_ip = request.client.host if request.client else "unknown"
+    await user_repo.record_login(user.id, client_ip)
     
-    # Reset failed attempts and update last login
-    user_store.update(user["id"], {
-        "login_attempts": 0,
-        "locked_until": None,
-        "last_login": datetime.utcnow(),
-    })
+    # Get organization name
+    org = await org_repo.get_by_id(user.organization_id)
+    org_name = org.name if org else "Organization"
     
     # Create access token (extended if remember_me)
-    expires_hours = 168 if request.remember_me else None  # 7 days if remember me
-    access_token, expires_in = create_access_token(user["id"], expires_hours)
+    expires_hours = 168 if data.remember_me else None  # 7 days if remember me
+    access_token, expires_in = await create_access_token(
+        str(user.id),
+        str(user.organization_id),
+        token_store,
+        expires_hours
+    )
     
-    logger.info(f"User logged in: {user['email']}")
+    logger.info(f"User logged in: {user.email}")
     
     return TokenResponse(
         access_token=access_token,
         expires_in=expires_in,
         user=UserResponse(
-            id=user["id"],
-            email=user["email"],
-            full_name=user["full_name"],
-            organization=user["organization"],
-            role=user["role"],
-            status=user["status"],
-            vm_status=user.get("vm_status"),
-            vm_ip=user.get("vm_ip"),
-            created_at=user["created_at"],
+            id=str(user.id),
+            email=user.email,
+            full_name=user.full_name,
+            organization_id=str(user.organization_id),
+            organization_name=org_name,
+            role=user.role,
+            status="active" if user.is_active else "suspended",
+            vm_status=user.metadata.get("vm_status") if user.metadata else None,
+            vm_ip=user.metadata.get("vm_ip") if user.metadata else None,
+            created_at=user.created_at or datetime.utcnow(),
             last_login=datetime.utcnow(),
         ),
     )
@@ -630,6 +749,7 @@ async def login(request: LoginRequest):
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -637,7 +757,9 @@ async def logout(
     Logout and invalidate current access token.
     """
     token = credentials.credentials
-    user_store.revoke_token(token)
+    token_store = await get_token_store_from_request(request)
+    
+    await token_store.revoke_token(token)
     
     logger.info(f"User logged out: {user['email']}")
     
@@ -645,80 +767,115 @@ async def logout(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)):
+async def get_current_user_info(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Get current user information.
     """
+    org_repo = get_org_repo(request)
+    org = await org_repo.get_by_id(UUID(user["organization_id"]))
+    org_name = org.name if org else "Organization"
+    
     return UserResponse(
         id=user["id"],
         email=user["email"],
-        full_name=user["full_name"],
-        organization=user["organization"],
+        full_name=user.get("full_name"),
+        organization_id=user["organization_id"],
+        organization_name=org_name,
         role=user["role"],
-        status=user["status"],
-        vm_status=user.get("vm_status"),
-        vm_ip=user.get("vm_ip"),
-        created_at=user["created_at"],
-        last_login=user.get("last_login"),
+        status="active" if user.get("is_active", True) else "suspended",
+        vm_status=user.get("metadata", {}).get("vm_status"),
+        vm_ip=user.get("metadata", {}).get("vm_ip"),
+        created_at=user.get("created_at") or datetime.utcnow(),
+        last_login=user.get("last_login_at"),
     )
 
 
 @router.put("/me", response_model=UserResponse)
 async def update_profile(
+    request: Request,
     updates: UserProfileUpdate,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Update current user profile.
     """
+    user_repo = get_user_repo(request)
+    org_repo = get_org_repo(request)
+    
     update_data = {}
     
     if updates.full_name is not None:
         update_data["full_name"] = updates.full_name
     
-    if updates.organization is not None:
-        update_data["organization"] = updates.organization
-    
     if update_data:
-        user = user_store.update(user["id"], update_data)
+        updated_user = await user_repo.update(
+            UUID(user["id"]),
+            update_data,
+            UUID(user["organization_id"])
+        )
+        if updated_user:
+            user["full_name"] = updated_user.full_name
+    
+    org = await org_repo.get_by_id(UUID(user["organization_id"]))
+    org_name = org.name if org else "Organization"
     
     return UserResponse(
         id=user["id"],
         email=user["email"],
-        full_name=user["full_name"],
-        organization=user["organization"],
+        full_name=user.get("full_name"),
+        organization_id=user["organization_id"],
+        organization_name=org_name,
         role=user["role"],
-        status=user["status"],
-        vm_status=user.get("vm_status"),
-        vm_ip=user.get("vm_ip"),
-        created_at=user["created_at"],
-        last_login=user.get("last_login"),
+        status="active" if user.get("is_active", True) else "suspended",
+        vm_status=user.get("metadata", {}).get("vm_status"),
+        vm_ip=user.get("metadata", {}).get("vm_ip"),
+        created_at=user.get("created_at") or datetime.utcnow(),
+        last_login=user.get("last_login_at"),
     )
 
 
 @router.post("/change-password")
 async def change_password(
-    request: PasswordChangeRequest,
+    request: Request,
+    data: PasswordChangeRequest,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Change current user password.
     """
+    user_repo = get_user_repo(request)
+    token_store = await get_token_store_from_request(request)
+    
+    # Get full user with password hash
+    full_user = await user_repo.get_by_id(
+        UUID(user["id"]),
+        UUID(user["organization_id"])
+    )
+    
+    if not full_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
     # Verify current password
-    if not bcrypt.checkpw(request.current_password.encode(), user["password_hash"].encode()):
+    if not bcrypt.checkpw(data.current_password.encode(), full_user.password_hash.encode()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect",
         )
     
     # Hash new password
-    new_hash = bcrypt.hashpw(request.new_password.encode(), bcrypt.gensalt()).decode()
+    new_hash = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
     
     # Update password
-    user_store.update(user["id"], {"password_hash": new_hash})
+    await user_repo.update_password(full_user.id, new_hash)
     
     # Revoke all existing tokens (force re-login)
-    user_store.revoke_all_user_tokens(user["id"])
+    await token_store.revoke_all_user_tokens(user["id"])
     
     logger.info(f"Password changed for user: {user['email']}")
     
@@ -726,35 +883,41 @@ async def change_password(
 
 
 @router.get("/vm/status")
-async def get_vm_status(user: Dict[str, Any] = Depends(get_current_user)):
+async def get_vm_status(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Get current user's VM provisioning status.
     """
+    metadata = user.get("metadata", {})
+    
     return {
-        "vm_status": user.get("vm_status"),
-        "vm_id": user.get("vm_id"),
-        "vm_ip": user.get("vm_ip"),
-        "message": _get_vm_status_message(user.get("vm_status")),
+        "vm_status": metadata.get("vm_status"),
+        "vm_id": metadata.get("vm_id"),
+        "vm_ip": metadata.get("vm_ip"),
+        "message": _get_vm_status_message(metadata.get("vm_status")),
     }
 
 
-def _get_vm_status_message(status: Optional[VMProvisionStatus]) -> str:
+def _get_vm_status_message(status: Optional[str]) -> str:
     """Get human-readable VM status message"""
     if status is None:
         return "VM not provisioned"
     
     messages = {
-        VMProvisionStatus.PENDING: "VM provisioning queued",
-        VMProvisionStatus.CREATING: "Creating your VM instance...",
-        VMProvisionStatus.CONFIGURING: "Configuring VM environment...",
-        VMProvisionStatus.READY: "VM is ready to use",
-        VMProvisionStatus.FAILED: "VM provisioning failed. Please contact support.",
+        VMProvisionStatus.PENDING.value: "VM provisioning queued",
+        VMProvisionStatus.CREATING.value: "Creating your VM instance...",
+        VMProvisionStatus.CONFIGURING.value: "Configuring VM environment...",
+        VMProvisionStatus.READY.value: "VM is ready to use",
+        VMProvisionStatus.FAILED.value: "VM provisioning failed. Please contact support.",
     }
     return messages.get(status, "Unknown status")
 
 
 @router.post("/vm/reprovision")
 async def reprovision_vm(
+    request: Request,
     background_tasks: BackgroundTasks,
     vm_config: Optional[VMConfiguration] = None,
     user: Dict[str, Any] = Depends(get_current_user),
@@ -762,50 +925,72 @@ async def reprovision_vm(
     """
     Re-provision user's VM (if failed or needs reset).
     """
-    if user.get("vm_status") == VMProvisionStatus.CREATING:
+    metadata = user.get("metadata", {})
+    
+    if metadata.get("vm_status") == VMProvisionStatus.CREATING.value:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="VM is currently being provisioned",
         )
     
+    user_repo = get_user_repo(request)
+    
     # Reset VM status
-    user_store.update(user["id"], {
-        "vm_status": VMProvisionStatus.PENDING,
-        "vm_id": None,
-        "vm_ip": None,
-    })
+    await user_repo.update(
+        UUID(user["id"]),
+        {"metadata": {"vm_status": VMProvisionStatus.PENDING.value, "vm_id": None, "vm_ip": None}},
+        UUID(user["organization_id"])
+    )
     
     # Start provisioning
     config = vm_config or VMConfiguration()
-    background_tasks.add_task(provision_user_vm, user["id"], config)
+    background_tasks.add_task(
+        provision_user_vm,
+        user["id"],
+        user["organization_id"],
+        config,
+        user_repo
+    )
     
     return {"message": "VM re-provisioning started"}
 
 
 # ═══════════════════════════════════════════════════════════════
-# Admin Routes
+# Admin Routes (Organization-scoped)
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/admin/users", response_model=List[UserResponse])
-async def list_users(
-    user: Dict[str, Any] = Depends(require_role(UserRole.ADMIN)),
+async def list_organization_users(
+    request: Request,
+    user: Dict[str, Any] = Depends(require_role("admin")),
 ):
     """
-    List all users (Admin only).
+    List all users in the current organization (Admin only).
+    
+    Note: This is organization-scoped, not global.
     """
-    users = user_store.list_all()
+    user_repo = get_user_repo(request)
+    org_repo = get_org_repo(request)
+    
+    org_id = UUID(user["organization_id"])
+    
+    users = await user_repo.get_organization_users(org_id)
+    org = await org_repo.get_by_id(org_id)
+    org_name = org.name if org else "Organization"
+    
     return [
         UserResponse(
-            id=u["id"],
-            email=u["email"],
-            full_name=u["full_name"],
-            organization=u["organization"],
-            role=u["role"],
-            status=u["status"],
-            vm_status=u.get("vm_status"),
-            vm_ip=u.get("vm_ip"),
-            created_at=u["created_at"],
-            last_login=u.get("last_login"),
+            id=str(u.id),
+            email=u.email,
+            full_name=u.full_name,
+            organization_id=str(u.organization_id),
+            organization_name=org_name,
+            role=u.role,
+            status="active" if u.is_active else "suspended",
+            vm_status=u.metadata.get("vm_status") if u.metadata else None,
+            vm_ip=u.metadata.get("vm_ip") if u.metadata else None,
+            created_at=u.created_at or datetime.utcnow(),
+            last_login=u.last_login_at,
         )
         for u in users
     ]
@@ -813,29 +998,39 @@ async def list_users(
 
 @router.put("/admin/users/{user_id}/status")
 async def update_user_status(
+    request: Request,
     user_id: str,
-    new_status: UserStatus,
-    admin: Dict[str, Any] = Depends(require_role(UserRole.ADMIN)),
+    new_status: str,  # "active" or "suspended"
+    admin: Dict[str, Any] = Depends(require_role("admin")),
 ):
     """
-    Update user status (Admin only).
+    Update user status within organization (Admin only).
     """
-    target_user = user_store.get_by_id(user_id)
+    user_repo = get_user_repo(request)
+    token_store = await get_token_store_from_request(request)
+    
+    org_id = UUID(admin["organization_id"])
+    target_user_id = UUID(user_id)
+    
+    # Get target user (must be in same org)
+    target_user = await user_repo.get_by_id(target_user_id, org_id)
     if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found in your organization")
     
     # Prevent self-suspension
-    if admin["id"] == user_id and new_status in [UserStatus.SUSPENDED, UserStatus.DELETED]:
+    if admin["id"] == user_id and new_status == "suspended":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot suspend or delete your own account",
+            detail="Cannot suspend your own account",
         )
     
-    user_store.update(user_id, {"status": new_status})
+    # Update status
+    is_active = new_status == "active"
+    await user_repo.update(target_user_id, {"is_active": is_active}, org_id)
     
-    # Revoke tokens if suspending/deleting
-    if new_status in [UserStatus.SUSPENDED, UserStatus.DELETED]:
-        user_store.revoke_all_user_tokens(user_id)
+    # Revoke tokens if suspending
+    if not is_active:
+        await token_store.revoke_all_user_tokens(user_id)
     
     logger.info(f"Admin {admin['email']} changed user {user_id} status to {new_status}")
     
@@ -844,19 +1039,104 @@ async def update_user_status(
 
 @router.put("/admin/users/{user_id}/role")
 async def update_user_role(
+    request: Request,
     user_id: str,
-    new_role: UserRole,
-    admin: Dict[str, Any] = Depends(require_role(UserRole.ADMIN)),
+    new_role: str,  # admin, operator, analyst, viewer
+    admin: Dict[str, Any] = Depends(require_role("admin")),
 ):
     """
-    Update user role (Admin only).
+    Update user role within organization (Admin only).
     """
-    target_user = user_store.get_by_id(user_id)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_repo = get_user_repo(request)
     
-    user_store.update(user_id, {"role": new_role})
+    org_id = UUID(admin["organization_id"])
+    target_user_id = UUID(user_id)
+    
+    # Get target user (must be in same org)
+    target_user = await user_repo.get_by_id(target_user_id, org_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found in your organization")
+    
+    # Validate role
+    valid_roles = ["admin", "operator", "analyst", "viewer"]
+    if new_role not in valid_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role. Must be one of: {valid_roles}"
+        )
+    
+    await user_repo.update_role(target_user_id, org_id, new_role)
     
     logger.info(f"Admin {admin['email']} changed user {user_id} role to {new_role}")
     
     return {"message": f"User role updated to {new_role}"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Organization Management Routes
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/organization")
+async def get_organization_info(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get current user's organization information.
+    """
+    org_repo = get_org_repo(request)
+    
+    org = await org_repo.get_by_id(UUID(user["organization_id"]))
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    return {
+        "id": str(org.id),
+        "name": org.name,
+        "slug": org.slug,
+        "plan": org.plan,
+        "is_active": org.is_active,
+        "created_at": org.created_at,
+        "settings": org.settings or {},
+    }
+
+
+@router.post("/organization/invite")
+async def invite_user_to_organization(
+    request: Request,
+    email: EmailStr,
+    role: str = "operator",
+    admin: Dict[str, Any] = Depends(require_role("admin")),
+):
+    """
+    Invite a user to join the organization (Admin only).
+    """
+    org_repo = get_org_repo(request)
+    user_repo = get_user_repo(request)
+    
+    org_id = UUID(admin["organization_id"])
+    
+    # Check if user already exists in this org
+    existing = await user_repo.get_by_email(org_id, email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User already exists in this organization"
+        )
+    
+    # Create invitation
+    invite_code = secrets.token_urlsafe(32)
+    await org_repo.create_invitation(
+        organization_id=org_id,
+        email=email,
+        role=role,
+        token=invite_code,
+        invited_by=UUID(admin["id"]),
+    )
+    
+    logger.info(f"Invitation sent to {email} for org {org_id}")
+    
+    return {
+        "message": f"Invitation sent to {email}",
+        "invite_code": invite_code,  # In production, send this via email
+    }

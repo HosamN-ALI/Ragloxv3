@@ -96,6 +96,10 @@ class Blackboard:
         except Exception:
             return False
     
+    def is_connected(self) -> bool:
+        """Check if Blackboard is connected to Redis."""
+        return self._connected
+    
     @property
     def redis(self) -> aioredis.Redis:
         """Get Redis client (raises if not connected)."""
@@ -158,6 +162,48 @@ class Blackboard:
     async def _delete(self, key: str) -> None:
         """Delete a key from Redis."""
         await self.redis.delete(key)
+    
+    # ═══════════════════════════════════════════════════════════
+    # Public Hash Operations (for workflow orchestrator compatibility)
+    # ═══════════════════════════════════════════════════════════
+    
+    async def hgetall(self, key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get all fields from a hash (public wrapper for _get_hash).
+        
+        This method is used by WorkflowOrchestrator and other components
+        that need direct hash access.
+        
+        Args:
+            key: Redis key
+            
+        Returns:
+            Dictionary of hash fields and values, or None if key doesn't exist
+        """
+        return await self._get_hash(key)
+    
+    async def hset(self, key: str, mapping: Dict[str, Any]) -> None:
+        """
+        Set multiple fields in a hash (public wrapper for _set_hash).
+        
+        Args:
+            key: Redis key
+            mapping: Dictionary of field-value pairs to set
+        """
+        await self._set_hash(key, mapping)
+    
+    async def hget(self, key: str, field: str) -> Optional[str]:
+        """
+        Get a single field from a hash.
+        
+        Args:
+            key: Redis key
+            field: Field name
+            
+        Returns:
+            Field value or None
+        """
+        return await self.redis.hget(key, field)
     
     # ═══════════════════════════════════════════════════════════
     # Mission Operations

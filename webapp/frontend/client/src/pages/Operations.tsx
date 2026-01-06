@@ -8,7 +8,8 @@ import { useParams, useLocation } from "wouter";
 import { DualPanelLayout } from "@/components/manus";
 import { useMissionStore } from "@/stores/missionStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { hitlApi, chatApi, missionApi, ApiError } from "@/lib/api";
+import { hitlApi, chatApi, missionApi, terminalApi, ApiError } from "@/lib/api";
+import type { CommandHistoryEntry } from "@/components/manus";
 import type { ChatMessage, EventCard, PlanTask, MissionStatus } from "@/types";
 import { toast } from "sonner";
 import {
@@ -101,6 +102,9 @@ export default function Operations() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<EventCard[]>([]);
   const [planTasks, setPlanTasks] = useState<PlanTask[]>([]);
+  
+  // Command history for playback
+  const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
 
   // Load mission data on mount
   useEffect(() => {
@@ -217,10 +221,18 @@ export default function Operations() {
     }
   }, [newChatMessages]);
 
-  // Sync store chat messages
+  // Sync store chat messages (merge instead of replace)
   useEffect(() => {
     if (storeChatMessages.length > 0) {
-      setChatMessages(storeChatMessages);
+      setChatMessages((prev) => {
+        // Merge store messages with local messages, avoiding duplicates
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newFromStore = storeChatMessages.filter((m) => !existingIds.has(m.id));
+        if (newFromStore.length > 0) {
+          return [...prev, ...newFromStore];
+        }
+        return prev;
+      });
     }
   }, [storeChatMessages]);
 
@@ -279,6 +291,9 @@ export default function Operations() {
   }, [missionId, loadAllData, loadStatistics]);
 
   // Handle sending messages with enhanced error handling
+  // Architecture: Hybrid approach for Red Team Operations
+  // - HTTP POST: Send message & get immediate response (fallback)
+  // - WebSocket: Receive real-time AI responses (primary)
   const handleSendMessage = useCallback(async (content: string) => {
     // Add user message to local state immediately (optimistic update)
     const userMessage: ChatMessage = {
@@ -293,20 +308,36 @@ export default function Operations() {
     try {
       const response = await chatApi.send(missionId, content);
 
-      // Add AI response to chat
-      setChatMessages((prev) => [...prev, response]);
+      // Handle response based on role:
+      // - "system": AI response received via HTTP (fallback when WebSocket unavailable)
+      // - "user": Just acknowledgment, WebSocket will deliver AI response
+      if (response.role === "system") {
+        // Check if this message already exists (from WebSocket)
+        setChatMessages((prev) => {
+          const exists = prev.some(m => m.id === response.id);
+          if (exists) {
+            // WebSocket already delivered this message
+            return prev;
+          }
+          // Add AI response (HTTP fallback)
+          return [...prev, response];
+        });
 
-      // Add to events for activity feed
-      addEvent({
-        id: `event-${Date.now()}`,
-        type: "chat_message",
-        title: "Message from assistant",
-        description: response.content,
-        timestamp: response.timestamp,
-        status: "completed",
-        data: response,
-        expanded: false,
-      });
+        // Add to events for activity feed (only if not duplicate)
+        addEvent({
+          id: `event-${Date.now()}`,
+          type: "chat_message",
+          title: response.command ? `Command: ${response.command}` : "Message from assistant",
+          description: response.content,
+          timestamp: response.timestamp,
+          status: "completed",
+          data: response,
+          command: response.command,  // Pass command for terminal integration
+          output: response.output?.join("\n"),  // Pass output for terminal
+          expanded: false,
+        });
+      }
+      // If response.role === "user", just acknowledge - WebSocket handles AI response
     } catch (error) {
       console.error("[Operations] Failed to send message:", error);
 
@@ -356,6 +387,71 @@ export default function Operations() {
       "Executing command...",
     ]);
   }, []);
+
+  // Handle replay command (execute command from history)
+  const handleReplayCommand = useCallback(async (command: string) => {
+    try {
+      // Show command in terminal
+      setTerminalOutput((prev) => [
+        ...prev,
+        "",
+        `ubuntu@raglox:~ $ ${command}`,
+        "Replaying command...",
+      ]);
+
+      // Execute the command
+      const result = await terminalApi.execute(missionId, command);
+      
+      // Update terminal output with result
+      setTerminalOutput((prev) => [
+        ...prev,
+        ...result.output,
+        result.status === "success" 
+          ? `Command completed with exit code ${result.exit_code}` 
+          : `Command failed: ${result.status}`,
+      ]);
+
+      // Add to command history
+      setCommandHistory((prev) => [
+        ...prev,
+        {
+          id: result.id,
+          command: result.command,
+          output: result.output,
+          timestamp: result.timestamp,
+          exitCode: result.exit_code,
+          duration: result.duration_ms,
+        },
+      ]);
+
+      // Add event
+      addEvent({
+        id: `event-cmd-${Date.now()}`,
+        type: "chat_message",
+        title: `Command Executed: ${command}`,
+        description: result.status === "success" 
+          ? `Exit code: ${result.exit_code}` 
+          : `Failed: ${result.status}`,
+        timestamp: result.timestamp,
+        status: result.status === "success" ? "completed" : "failed",
+        command,
+        expanded: false,
+      });
+
+      toast.success("Command replayed successfully");
+    } catch (error) {
+      console.error("[Operations] Failed to replay command:", error);
+      
+      setTerminalOutput((prev) => [
+        ...prev,
+        `Error: Failed to execute command`,
+      ]);
+      
+      toast.error("Failed to replay command", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }, [missionId, addEvent]);
 
   // Handle approval with enhanced feedback
   const handleApprove = useCallback(async (actionId: string, comment?: string) => {
@@ -639,6 +735,9 @@ export default function Operations() {
           onApprove={handleApprove}
           onReject={handleReject}
           onClearTerminal={handleClearTerminal}
+          onReplayCommand={handleReplayCommand}
+          commandHistory={commandHistory}
+          enablePlayback={true}
           showSidebar={true}
           showDemoData={false}
         />

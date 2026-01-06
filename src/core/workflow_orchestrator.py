@@ -1216,12 +1216,33 @@ Be concise and actionable.
     
     async def get_workflow_status(self, mission_id: str) -> Optional[Dict[str, Any]]:
         """Get current workflow status."""
+        logger.debug(f"get_workflow_status called for mission_id: {mission_id}")
+        logger.debug(f"Active workflows: {list(self._active_workflows.keys())}")
+        
         if mission_id in self._active_workflows:
+            logger.debug("Found in active workflows")
             return self._active_workflows[mission_id].to_dict()
         
-        # Try to load from blackboard
-        data = await self.blackboard.hgetall(f"workflow:{mission_id}")
-        return data if data else None
+        # Try to load from blackboard (ensure connected first)
+        logger.debug(f"Blackboard: {self.blackboard}, _redis: {getattr(self.blackboard, '_redis', None)}")
+        
+        try:
+            # Check if blackboard is connected by testing internal _redis
+            bb_redis = getattr(self.blackboard, '_redis', None)
+            bb_connected = getattr(self.blackboard, '_connected', False)
+            logger.debug(f"bb_redis: {bb_redis}, bb_connected: {bb_connected}")
+            
+            if not bb_redis or not bb_connected:
+                logger.info(f"Blackboard not connected, attempting to connect...")
+                await self.blackboard.connect()
+                logger.info("Blackboard connected successfully")
+            
+            data = await self.blackboard.hgetall(f"workflow:{mission_id}")
+            logger.debug(f"Data from blackboard: {data}")
+            return data if data else None
+        except Exception as e:
+            logger.warning(f"Failed to get workflow status from blackboard: {e}", exc_info=True)
+            return None
     
     async def pause_workflow(self, mission_id: str) -> bool:
         """Pause a workflow."""
@@ -1267,10 +1288,27 @@ _workflow_orchestrator: Optional[AgentWorkflowOrchestrator] = None
 
 def get_workflow_orchestrator(
     blackboard: Optional[Blackboard] = None,
-    settings: Optional[Settings] = None
+    settings: Optional[Settings] = None,
+    use_singleton: bool = True
 ) -> AgentWorkflowOrchestrator:
-    """Get or create the workflow orchestrator singleton."""
+    """
+    Get or create the workflow orchestrator.
+    
+    IMPORTANT: If blackboard is provided, it should already be connected.
+    The orchestrator uses the provided blackboard for all operations.
+    
+    Args:
+        blackboard: Connected Blackboard instance
+        settings: Application settings
+        use_singleton: If True, use singleton pattern. If False, always create new instance.
+    """
     global _workflow_orchestrator
+    
+    if not use_singleton:
+        return AgentWorkflowOrchestrator(
+            blackboard=blackboard,
+            settings=settings
+        )
     
     if _workflow_orchestrator is None:
         _workflow_orchestrator = AgentWorkflowOrchestrator(
@@ -1278,4 +1316,14 @@ def get_workflow_orchestrator(
             settings=settings
         )
     
+    # Always update blackboard if a connected one is provided
+    if blackboard is not None:
+        _workflow_orchestrator.blackboard = blackboard
+    
     return _workflow_orchestrator
+
+
+def reset_workflow_orchestrator() -> None:
+    """Reset the workflow orchestrator singleton."""
+    global _workflow_orchestrator
+    _workflow_orchestrator = None
