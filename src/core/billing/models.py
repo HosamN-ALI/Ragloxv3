@@ -56,6 +56,7 @@ PLAN_PRICING = {
         "price_yearly": 0,
         "stripe_price_id_monthly": None,
         "stripe_price_id_yearly": None,
+        "stripe_product_id": None,
         "features": {
             "max_users": 3,
             "max_missions_per_month": 5,
@@ -71,8 +72,9 @@ PLAN_PRICING = {
         "name": "Starter",
         "price_monthly": 49,
         "price_yearly": 490,
-        "stripe_price_id_monthly": "price_starter_monthly",
-        "stripe_price_id_yearly": "price_starter_yearly",
+        "stripe_price_id_monthly": "price_1SmboIQZf6X1AyY5gi4OLgb7",
+        "stripe_price_id_yearly": "price_1SmboIQZf6X1AyY5B7Ntt03v",
+        "stripe_product_id": "prod_Tk60BT981KuchB",
         "features": {
             "max_users": 10,
             "max_missions_per_month": 25,
@@ -88,8 +90,9 @@ PLAN_PRICING = {
         "name": "Professional",
         "price_monthly": 199,
         "price_yearly": 1990,
-        "stripe_price_id_monthly": "price_professional_monthly",
-        "stripe_price_id_yearly": "price_professional_yearly",
+        "stripe_price_id_monthly": "price_1SmboIQZf6X1AyY5MZX03Dog",
+        "stripe_price_id_yearly": "price_1SmboJQZf6X1AyY5MVnuF8TP",
+        "stripe_product_id": "prod_Tk60dEs9zht87z",
         "features": {
             "max_users": 50,
             "max_missions_per_month": 100,
@@ -105,8 +108,9 @@ PLAN_PRICING = {
         "name": "Enterprise",
         "price_monthly": 499,
         "price_yearly": 4990,
-        "stripe_price_id_monthly": "price_enterprise_monthly",
-        "stripe_price_id_yearly": "price_enterprise_yearly",
+        "stripe_price_id_monthly": "price_1SVje7QZf6X1AyY5ZspNTBDo",
+        "stripe_price_id_yearly": "price_1SVje8QZf6X1AyY5aQpJxo0A",
+        "stripe_product_id": "prod_TSeyNNEx9WnH11",
         "features": {
             "max_users": 1000,
             "max_missions_per_month": 10000,

@@ -383,6 +383,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.error(f"❌ Token Store initialization failed: {e}")
         app.state.token_store = None
     
+    # ===================================================================
+    # Initialize Billing Service (Stripe) - SaaS
+    # ===================================================================
+    try:
+        if settings.stripe_enabled and settings.is_stripe_configured:
+            from ..core.billing.service import init_billing_service
+            billing_service = init_billing_service(
+                stripe_secret_key=settings.stripe_secret_key,
+                stripe_webhook_secret=settings.stripe_webhook_secret,
+                organization_repo=app.state.org_repo,
+            )
+            app.state.billing_service = billing_service
+            logger.info("✅ Billing Service initialized (Stripe)")
+        else:
+            if settings.stripe_enabled:
+                logger.warning("⚠️ Stripe enabled but not configured - billing disabled")
+            app.state.billing_service = None
+    except Exception as e:
+        logger.error(f"❌ Billing Service initialization failed: {e}")
+        app.state.billing_service = None
+    
     # Initialize Controller with EnvironmentManager for VM/SSH execution
     controller = MissionController(
         blackboard=blackboard,
