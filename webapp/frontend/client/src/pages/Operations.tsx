@@ -8,7 +8,8 @@ import { useParams, useLocation } from "wouter";
 import { DualPanelLayout } from "@/components/manus";
 import { useMissionStore } from "@/stores/missionStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { hitlApi, chatApi, missionApi, ApiError } from "@/lib/api";
+import { hitlApi, chatApi, missionApi, terminalApi, ApiError } from "@/lib/api";
+import type { CommandHistoryEntry } from "@/components/manus";
 import type { ChatMessage, EventCard, PlanTask, MissionStatus } from "@/types";
 import { toast } from "sonner";
 import {
@@ -101,6 +102,9 @@ export default function Operations() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<EventCard[]>([]);
   const [planTasks, setPlanTasks] = useState<PlanTask[]>([]);
+  
+  // Command history for playback
+  const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
 
   // Load mission data on mount
   useEffect(() => {
@@ -381,6 +385,71 @@ export default function Operations() {
       "Executing command...",
     ]);
   }, []);
+
+  // Handle replay command (execute command from history)
+  const handleReplayCommand = useCallback(async (command: string) => {
+    try {
+      // Show command in terminal
+      setTerminalOutput((prev) => [
+        ...prev,
+        "",
+        `ubuntu@raglox:~ $ ${command}`,
+        "Replaying command...",
+      ]);
+
+      // Execute the command
+      const result = await terminalApi.execute(missionId, command);
+      
+      // Update terminal output with result
+      setTerminalOutput((prev) => [
+        ...prev,
+        ...result.output,
+        result.status === "success" 
+          ? `Command completed with exit code ${result.exit_code}` 
+          : `Command failed: ${result.status}`,
+      ]);
+
+      // Add to command history
+      setCommandHistory((prev) => [
+        ...prev,
+        {
+          id: result.id,
+          command: result.command,
+          output: result.output,
+          timestamp: result.timestamp,
+          exitCode: result.exit_code,
+          duration: result.duration_ms,
+        },
+      ]);
+
+      // Add event
+      addEvent({
+        id: `event-cmd-${Date.now()}`,
+        type: "chat_message",
+        title: `Command Executed: ${command}`,
+        description: result.status === "success" 
+          ? `Exit code: ${result.exit_code}` 
+          : `Failed: ${result.status}`,
+        timestamp: result.timestamp,
+        status: result.status === "success" ? "completed" : "failed",
+        command,
+        expanded: false,
+      });
+
+      toast.success("Command replayed successfully");
+    } catch (error) {
+      console.error("[Operations] Failed to replay command:", error);
+      
+      setTerminalOutput((prev) => [
+        ...prev,
+        `Error: Failed to execute command`,
+      ]);
+      
+      toast.error("Failed to replay command", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }, [missionId, addEvent]);
 
   // Handle approval with enhanced feedback
   const handleApprove = useCallback(async (actionId: string, comment?: string) => {
@@ -664,6 +733,9 @@ export default function Operations() {
           onApprove={handleApprove}
           onReject={handleReject}
           onClearTerminal={handleClearTerminal}
+          onReplayCommand={handleReplayCommand}
+          commandHistory={commandHistory}
+          enablePlayback={true}
           showSidebar={true}
           showDemoData={false}
         />

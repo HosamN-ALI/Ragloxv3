@@ -152,8 +152,21 @@ class UserRepository(BaseRepository[User]):
     
     def _record_to_entity(self, record: Any) -> Optional[User]:
         """Convert database record to User entity."""
+        import json
+        
         if not record:
             return None
+        
+        # Parse JSON fields that might be strings
+        def parse_json_field(value, default):
+            if value is None:
+                return default
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    return default
+            return value
         
         return User(
             id=record["id"],
@@ -164,7 +177,7 @@ class UserRepository(BaseRepository[User]):
             full_name=record.get("full_name"),
             avatar_url=record.get("avatar_url"),
             role=record.get("role", "operator"),
-            permissions=record.get("permissions", []),
+            permissions=parse_json_field(record.get("permissions"), []),
             is_active=record.get("is_active", True),
             is_superuser=record.get("is_superuser", False),
             is_org_owner=record.get("is_org_owner", False),
@@ -178,8 +191,8 @@ class UserRepository(BaseRepository[User]):
             last_login_ip=record.get("last_login_ip"),
             login_attempts=record.get("login_attempts", 0),
             locked_until=record.get("locked_until"),
-            settings=record.get("settings", {}),
-            metadata=record.get("metadata", {}),
+            settings=parse_json_field(record.get("settings"), {}),
+            metadata=parse_json_field(record.get("metadata"), {}),
             created_at=record.get("created_at"),
             updated_at=record.get("updated_at"),
         )

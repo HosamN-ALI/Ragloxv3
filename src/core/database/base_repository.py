@@ -223,10 +223,19 @@ class BaseRepository(ABC, Generic[T]):
         Returns:
             Created entity with ID
         """
+        import json
         data = self._entity_to_dict(entity)
         
+        # Convert dict/list values to JSON strings for JSONB columns
+        processed_data = {}
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                processed_data[key] = json.dumps(value)
+            else:
+                processed_data[key] = value
+        
         # Build INSERT query
-        columns = list(data.keys())
+        columns = list(processed_data.keys())
         placeholders = [f"${i+1}" for i in range(len(columns))]
         
         query = f"""
@@ -235,7 +244,7 @@ class BaseRepository(ABC, Generic[T]):
             RETURNING *
         """
         
-        row = await self.pool.fetchrow(query, *data.values())
+        row = await self.pool.fetchrow(query, *processed_data.values())
         return self._record_to_entity(row)
     
     async def update(
@@ -255,15 +264,25 @@ class BaseRepository(ABC, Generic[T]):
         Returns:
             Updated entity or None if not found
         """
+        import json
+        
         if not updates:
             return await self.get_by_id(id, organization_id)
         
         # Add updated_at timestamp
         updates["updated_at"] = datetime.utcnow()
         
+        # Convert dict/list values to JSON strings for JSONB columns
+        processed_updates = {}
+        for key, value in updates.items():
+            if isinstance(value, (dict, list)):
+                processed_updates[key] = json.dumps(value)
+            else:
+                processed_updates[key] = value
+        
         # Build UPDATE query
-        set_clauses = [f"{key} = ${i+1}" for i, key in enumerate(updates.keys())]
-        param_index = len(updates) + 1
+        set_clauses = [f"{key} = ${i+1}" for i, key in enumerate(processed_updates.keys())]
+        param_index = len(processed_updates) + 1
         
         if organization_id:
             query = f"""
@@ -272,7 +291,7 @@ class BaseRepository(ABC, Generic[T]):
                 WHERE id = ${param_index} AND organization_id = ${param_index + 1}
                 RETURNING *
             """
-            row = await self.pool.fetchrow(query, *updates.values(), id, organization_id)
+            row = await self.pool.fetchrow(query, *processed_updates.values(), id, organization_id)
         else:
             query = f"""
                 UPDATE {self.table_name}
@@ -280,7 +299,7 @@ class BaseRepository(ABC, Generic[T]):
                 WHERE id = ${param_index}
                 RETURNING *
             """
-            row = await self.pool.fetchrow(query, *updates.values(), id)
+            row = await self.pool.fetchrow(query, *processed_updates.values(), id)
         
         return self._record_to_entity(row) if row else None
     

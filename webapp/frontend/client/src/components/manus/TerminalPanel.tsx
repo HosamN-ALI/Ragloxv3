@@ -1,9 +1,10 @@
 // RAGLOX v3.0 - Terminal Panel Component
 // Simplified header, softer colors, institutional quality
 // Updated for real-time WebSocket integration
+// Enhanced with playback controls for navigating command history
 
-import { useRef, useEffect, useState, useMemo } from "react";
-import { motion } from "framer-motion";
+import { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Terminal,
   Copy,
@@ -16,11 +17,31 @@ import {
   Wifi,
   WifiOff,
   Trash2,
-  Download
+  Download,
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  Rewind,
+  FastForward,
+  ChevronUp,
+  ChevronDown,
+  Clock,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ConnectionStatus } from "@/types";
+
+// Command history entry
+export interface CommandHistoryEntry {
+  id: string;
+  command: string;
+  output: string[];
+  timestamp: string;
+  exitCode?: number;
+  duration?: number;
+}
 
 interface TerminalPanelProps {
   title?: string;
@@ -34,6 +55,10 @@ interface TerminalPanelProps {
   className?: string;
   // Connection status
   connectionStatus?: ConnectionStatus;
+  // Playback controls
+  commandHistory?: CommandHistoryEntry[];
+  onReplayCommand?: (command: string) => void;
+  enablePlayback?: boolean;
 }
 
 export function TerminalPanel({
@@ -47,13 +72,126 @@ export function TerminalPanel({
   onClear,
   className,
   connectionStatus = "disconnected",
+  commandHistory = [],
+  onReplayCommand,
+  enablePlayback = false,
 }: TerminalPanelProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [copied, setCopied] = useState(false);
+  
+  // Playback state
+  const [showHistory, setShowHistory] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(-1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Compute if terminal has content
   const hasOutput = useMemo(() => output.length > 0, [output]);
+  
+  // Compute commands from output for playback
+  const extractedCommands = useMemo(() => {
+    const commands: CommandHistoryEntry[] = [];
+    let currentCommand: string | null = null;
+    let currentOutput: string[] = [];
+    let commandCount = 0;
+    
+    output.forEach((line, index) => {
+      // Detect command lines (starts with $ or has prompt pattern)
+      const isCommand = line.includes('$ ') || line.startsWith('$ ');
+      
+      if (isCommand) {
+        // Save previous command if exists
+        if (currentCommand) {
+          commands.push({
+            id: `cmd-${commandCount}`,
+            command: currentCommand,
+            output: currentOutput,
+            timestamp: new Date().toISOString(),
+          });
+          commandCount++;
+        }
+        // Extract command from the line
+        const match = line.match(/\$\s+(.+)/);
+        currentCommand = match ? match[1] : line.replace(/.*\$\s*/, '');
+        currentOutput = [];
+      } else if (currentCommand) {
+        currentOutput.push(line);
+      }
+    });
+    
+    // Don't forget the last command
+    if (currentCommand) {
+      commands.push({
+        id: `cmd-${commandCount}`,
+        command: currentCommand,
+        output: currentOutput,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
+    return commandHistory.length > 0 ? commandHistory : commands;
+  }, [output, commandHistory]);
+
+  // Playback controls
+  const handlePrevCommand = useCallback(() => {
+    if (extractedCommands.length === 0) return;
+    setSelectedCommandIndex(prev => 
+      prev <= 0 ? extractedCommands.length - 1 : prev - 1
+    );
+  }, [extractedCommands.length]);
+
+  const handleNextCommand = useCallback(() => {
+    if (extractedCommands.length === 0) return;
+    setSelectedCommandIndex(prev => 
+      prev >= extractedCommands.length - 1 ? 0 : prev + 1
+    );
+  }, [extractedCommands.length]);
+
+  const handleReplay = useCallback(() => {
+    if (selectedCommandIndex >= 0 && extractedCommands[selectedCommandIndex]) {
+      onReplayCommand?.(extractedCommands[selectedCommandIndex].command);
+      toast.success(`Replaying: ${extractedCommands[selectedCommandIndex].command}`);
+    }
+  }, [selectedCommandIndex, extractedCommands, onReplayCommand]);
+
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
+      }
+      setIsPlaying(false);
+    } else {
+      setIsPlaying(true);
+      if (selectedCommandIndex < 0) {
+        setSelectedCommandIndex(0);
+      }
+      playbackIntervalRef.current = setInterval(() => {
+        setSelectedCommandIndex(prev => {
+          if (prev >= extractedCommands.length - 1) {
+            setIsPlaying(false);
+            if (playbackIntervalRef.current) {
+              clearInterval(playbackIntervalRef.current);
+              playbackIntervalRef.current = null;
+            }
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 2000 / playbackSpeed);
+    }
+  }, [isPlaying, selectedCommandIndex, extractedCommands.length, playbackSpeed]);
+
+  // Cleanup playback interval on unmount
+  useEffect(() => {
+    return () => {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Auto-scroll to bottom when new output arrives
   useEffect(() => {
@@ -225,7 +363,62 @@ export function TerminalPanel({
         )}
       </div>
 
-      {/* Simplified Footer */}
+      {/* Command History Panel */}
+      <AnimatePresence>
+        {showHistory && extractedCommands.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+            style={{
+              background: 'rgba(0, 0, 0, 0.4)',
+              borderTop: '1px solid rgba(255,255,255,0.06)',
+              maxHeight: '200px',
+            }}
+          >
+            <div className="p-2 overflow-y-auto max-h-[180px]">
+              <div className="text-xs font-medium mb-2 px-2" style={{ color: '#888888' }}>
+                Command History ({extractedCommands.length})
+              </div>
+              {extractedCommands.map((entry, index) => (
+                <button
+                  key={entry.id}
+                  onClick={() => setSelectedCommandIndex(index)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left transition-colors",
+                    selectedCommandIndex === index && "bg-primary/10"
+                  )}
+                  style={{ color: selectedCommandIndex === index ? '#4a9eff' : '#a0a0a0' }}
+                  onMouseEnter={(e) => {
+                    if (selectedCommandIndex !== index) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (selectedCommandIndex !== index) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  <span className="text-xs w-5" style={{ color: '#666666' }}>#{index + 1}</span>
+                  <code className="text-xs truncate flex-1" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                    {entry.command}
+                  </code>
+                  {entry.duration && (
+                    <span className="text-xs" style={{ color: '#666666' }}>
+                      {entry.duration}ms
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Footer with Playback Controls */}
       <div
         className="flex items-center justify-between px-4 py-2"
         style={{
@@ -239,8 +432,88 @@ export function TerminalPanel({
           <span className="text-xs" style={{ color: '#888888' }}>{branch}</span>
         </div>
 
+        {/* Playback Controls - only show if enablePlayback and has commands */}
+        {enablePlayback && extractedCommands.length > 0 && (
+          <div className="flex items-center gap-1">
+            {/* History Toggle */}
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={cn(
+                "w-6 h-6 rounded flex items-center justify-center transition-all duration-150",
+                showHistory && "bg-primary/10"
+              )}
+              style={{ color: showHistory ? '#4a9eff' : '#888888' }}
+              title="Show command history"
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = showHistory ? 'rgba(74, 158, 255, 0.1)' : 'transparent'}
+            >
+              <History className="w-3.5 h-3.5" />
+            </button>
+            
+            {/* Previous Command */}
+            <button
+              onClick={handlePrevCommand}
+              className="w-6 h-6 rounded flex items-center justify-center transition-all duration-150"
+              style={{ color: '#888888' }}
+              title="Previous command"
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <SkipBack className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Play/Pause */}
+            <button
+              onClick={togglePlayback}
+              className="w-6 h-6 rounded flex items-center justify-center transition-all duration-150"
+              style={{ color: isPlaying ? '#4ade80' : '#888888' }}
+              title={isPlaying ? "Pause playback" : "Start playback"}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            </button>
+
+            {/* Next Command */}
+            <button
+              onClick={handleNextCommand}
+              className="w-6 h-6 rounded flex items-center justify-center transition-all duration-150"
+              style={{ color: '#888888' }}
+              title="Next command"
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <SkipForward className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Replay Selected */}
+            {selectedCommandIndex >= 0 && onReplayCommand && (
+              <button
+                onClick={handleReplay}
+                className="ml-1 px-2 h-6 rounded flex items-center gap-1 transition-all duration-150"
+                style={{ 
+                  color: '#4a9eff',
+                  background: 'rgba(74, 158, 255, 0.1)',
+                  fontSize: '11px',
+                }}
+                title="Replay selected command"
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(74, 158, 255, 0.2)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(74, 158, 255, 0.1)'}
+              >
+                <FastForward className="w-3 h-3" />
+                Replay
+              </button>
+            )}
+
+            {/* Command Counter */}
+            <span className="text-xs ml-2" style={{ color: '#666666' }}>
+              {selectedCommandIndex >= 0 ? selectedCommandIndex + 1 : '-'}/{extractedCommands.length}
+            </span>
+          </div>
+        )}
+
         {/* Executing command indicator */}
-        {executingCommand && (
+        {executingCommand && !enablePlayback && (
           <div className="flex items-center gap-2">
             <Terminal className="w-3.5 h-3.5" style={{ color: '#4a9eff' }} />
             <code className="text-xs" style={{ color: '#e8e8e8' }}>{executingCommand}</code>

@@ -1,349 +1,291 @@
 // RAGLOX v3.0 - Suggested Actions Component
-// AI-generated follow-up suggestions based on findings
-// Based on Manus.im design
+// Shows smart follow-up suggestions based on context
+// Part of the Chat UX features per development plan
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Sparkles,
+  Lightbulb,
+  ChevronDown,
+  ChevronUp,
   Target,
   Shield,
   Terminal,
-  FileText,
-  AlertTriangle,
-  ChevronRight,
   Zap,
-  Search,
-  Lock,
-  Crosshair,
-  Bug
+  Scan,
+  Key,
+  Network,
+  Bug,
+  ArrowRight,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface SuggestedAction {
   id: string;
-  type: "exploit" | "scan" | "recon" | "report" | "manual" | "escalate";
+  type: 'scan' | 'exploit' | 'credential' | 'lateral' | 'recon' | 'report' | 'custom';
   title: string;
-  description: string;
+  description?: string;
   command?: string;
-  priority: "high" | "medium" | "low";
+  priority: 'high' | 'medium' | 'low';
   reason?: string;
-  targetInfo?: {
-    ip?: string;
-    port?: number;
-    service?: string;
-    vulnerability?: string;
-  };
 }
 
 interface SuggestedActionsProps {
   suggestions: SuggestedAction[];
-  onExecute: (action: SuggestedAction) => void;
-  onDismiss?: (actionId: string) => void;
+  onSelect: (suggestion: SuggestedAction) => void;
   isLoading?: boolean;
   className?: string;
 }
 
 export function SuggestedActions({
   suggestions,
-  onExecute,
-  onDismiss,
+  onSelect,
   isLoading = false,
   className,
 }: SuggestedActionsProps) {
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [isExpanded, setIsExpanded] = useState(true);
 
-  // Filter out dismissed suggestions
-  const visibleSuggestions = suggestions.filter(
-    (s) => !dismissedIds.has(s.id)
-  );
-
-  const handleDismiss = (actionId: string) => {
-    setDismissedIds((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(actionId);
-      return newSet;
+  // Group suggestions by type
+  const groupedSuggestions = useMemo(() => {
+    const groups: Record<string, SuggestedAction[]> = {};
+    suggestions.forEach(s => {
+      if (!groups[s.type]) groups[s.type] = [];
+      groups[s.type].push(s);
     });
-    onDismiss?.(actionId);
-  };
+    return groups;
+  }, [suggestions]);
 
-  if (visibleSuggestions.length === 0 && !isLoading) {
+  if (suggestions.length === 0 && !isLoading) {
     return null;
   }
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
       className={cn("rounded-xl overflow-hidden", className)}
       style={{
-        background: "rgba(30, 30, 30, 0.95)",
-        border: "1px solid rgba(255, 255, 255, 0.06)",
+        background: 'rgba(38, 38, 38, 0.8)',
+        backdropFilter: 'blur(8px)',
+        border: '1px solid rgba(255,255,255,0.08)',
       }}
     >
       {/* Header */}
-      <div
-        className="flex items-center gap-3 px-4 py-3"
-        style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.06)" }}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-4 py-3 transition-colors"
+        style={{ borderBottom: isExpanded ? '1px solid rgba(255,255,255,0.06)' : 'none' }}
+        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
       >
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{ background: "rgba(167, 139, 250, 0.15)" }}
-        >
-          <Sparkles className="w-4 h-4" style={{ color: "#a78bfa" }} />
-        </div>
-        <div>
-          <span className="text-sm font-medium" style={{ color: "#e8e8e8" }}>
-            Suggested Next Steps
+        <div className="flex items-center gap-2">
+          <div
+            className="w-7 h-7 rounded-lg flex items-center justify-center"
+            style={{ background: 'rgba(251, 191, 36, 0.15)' }}
+          >
+            <Lightbulb className="w-4 h-4" style={{ color: '#fbbf24' }} />
+          </div>
+          <span className="font-medium text-sm" style={{ color: '#e8e8e8' }}>
+            Suggested Actions
           </span>
-          <p className="text-xs" style={{ color: "#666666" }}>
-            AI-generated recommendations based on findings
-          </p>
+          <span className="text-xs px-1.5 py-0.5 rounded" style={{ 
+            background: 'rgba(251, 191, 36, 0.15)', 
+            color: '#fbbf24' 
+          }}>
+            {suggestions.length}
+          </span>
         </div>
-      </div>
-
-      {/* Suggestions List */}
-      <div className="p-2">
-        {isLoading ? (
-          <LoadingSkeleton />
+        {isExpanded ? (
+          <ChevronUp className="w-4 h-4" style={{ color: '#888888' }} />
         ) : (
-          <AnimatePresence>
-            {visibleSuggestions.map((suggestion, index) => (
-              <motion.div
-                key={suggestion.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ delay: index * 0.05 }}
-              >
-                <SuggestionCard
-                  suggestion={suggestion}
-                  onExecute={() => onExecute(suggestion)}
-                  onDismiss={() => handleDismiss(suggestion.id)}
-                />
-              </motion.div>
-            ))}
-          </AnimatePresence>
+          <ChevronDown className="w-4 h-4" style={{ color: '#888888' }} />
         )}
-      </div>
-    </div>
+      </button>
+
+      {/* Content */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: "auto" }}
+            exit={{ height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="p-3 space-y-2">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 animate-pulse" style={{ color: '#fbbf24' }} />
+                    <span className="text-sm" style={{ color: '#888888' }}>
+                      Generating suggestions...
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                suggestions.map((suggestion) => (
+                  <SuggestionItem
+                    key={suggestion.id}
+                    suggestion={suggestion}
+                    onSelect={() => onSelect(suggestion)}
+                  />
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
-// Suggestion Card Component
-interface SuggestionCardProps {
+// Individual suggestion item
+function SuggestionItem({
+  suggestion,
+  onSelect,
+}: {
   suggestion: SuggestedAction;
-  onExecute: () => void;
-  onDismiss: () => void;
-}
-
-function SuggestionCard({ suggestion, onExecute, onDismiss }: SuggestionCardProps) {
-  const [isHovered, setIsHovered] = useState(false);
-
-  // Get icon and color based on type
-  const getTypeInfo = () => {
+  onSelect: () => void;
+}) {
+  const { icon: Icon, color, bgColor } = useMemo(() => {
     switch (suggestion.type) {
-      case "exploit":
-        return { icon: Zap, color: "#ef4444", bgColor: "rgba(239, 68, 68, 0.15)" };
-      case "scan":
-        return { icon: Search, color: "#f59e0b", bgColor: "rgba(245, 158, 11, 0.15)" };
-      case "recon":
-        return { icon: Target, color: "#4a9eff", bgColor: "rgba(74, 158, 255, 0.15)" };
-      case "report":
-        return { icon: FileText, color: "#4ade80", bgColor: "rgba(74, 222, 128, 0.15)" };
-      case "escalate":
-        return { icon: Lock, color: "#a78bfa", bgColor: "rgba(167, 139, 250, 0.15)" };
-      case "manual":
+      case 'scan':
+        return { icon: Scan, color: '#4a9eff', bgColor: 'rgba(74, 158, 255, 0.15)' };
+      case 'exploit':
+        return { icon: Bug, color: '#ef4444', bgColor: 'rgba(239, 68, 68, 0.15)' };
+      case 'credential':
+        return { icon: Key, color: '#f59e0b', bgColor: 'rgba(245, 158, 11, 0.15)' };
+      case 'lateral':
+        return { icon: Network, color: '#a78bfa', bgColor: 'rgba(167, 139, 250, 0.15)' };
+      case 'recon':
+        return { icon: Target, color: '#4ade80', bgColor: 'rgba(74, 222, 128, 0.15)' };
+      case 'report':
+        return { icon: Shield, color: '#06b6d4', bgColor: 'rgba(6, 182, 212, 0.15)' };
       default:
-        return { icon: Terminal, color: "#888888", bgColor: "rgba(136, 136, 136, 0.15)" };
+        return { icon: Zap, color: '#888888', bgColor: 'rgba(136, 136, 136, 0.15)' };
     }
-  };
+  }, [suggestion.type]);
 
-  // Get priority badge color
-  const getPriorityColor = () => {
+  const priorityColor = useMemo(() => {
     switch (suggestion.priority) {
-      case "high":
-        return { bg: "rgba(239, 68, 68, 0.15)", text: "#ef4444" };
-      case "medium":
-        return { bg: "rgba(245, 158, 11, 0.15)", text: "#f59e0b" };
-      case "low":
-        return { bg: "rgba(136, 136, 136, 0.15)", text: "#888888" };
+      case 'high': return '#ef4444';
+      case 'medium': return '#f59e0b';
+      case 'low': return '#4ade80';
+      default: return '#888888';
     }
-  };
-
-  const typeInfo = getTypeInfo();
-  const priorityColor = getPriorityColor();
-  const TypeIcon = typeInfo.icon;
+  }, [suggestion.priority]);
 
   return (
-    <div
-      className="p-3 rounded-lg mb-2 transition-all duration-200 cursor-pointer"
-      style={{
-        background: isHovered ? "rgba(255, 255, 255, 0.04)" : "transparent",
-      }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={onExecute}
+    <button
+      onClick={onSelect}
+      className="w-full flex items-start gap-3 p-3 rounded-lg transition-all group"
+      style={{ background: 'transparent' }}
+      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
     >
-      <div className="flex items-start gap-3">
-        {/* Icon */}
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: typeInfo.bgColor }}
-        >
-          <TypeIcon className="w-4.5 h-4.5" style={{ color: typeInfo.color }} />
+      {/* Icon */}
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ background: bgColor }}
+      >
+        <Icon className="w-4 h-4" style={{ color }} />
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 text-left min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm" style={{ color: '#e8e8e8' }}>
+            {suggestion.title}
+          </span>
+          {/* Priority indicator */}
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded uppercase font-medium"
+            style={{
+              background: `${priorityColor}15`,
+              color: priorityColor,
+            }}
+          >
+            {suggestion.priority}
+          </span>
         </div>
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-medium" style={{ color: "#e8e8e8" }}>
-              {suggestion.title}
-            </span>
-            <span
-              className="px-1.5 py-0.5 rounded text-xs"
-              style={{ background: priorityColor.bg, color: priorityColor.text }}
-            >
-              {suggestion.priority}
-            </span>
-          </div>
-
-          <p className="text-xs mb-2" style={{ color: "#888888" }}>
+        {suggestion.description && (
+          <p className="text-xs mt-0.5 line-clamp-2" style={{ color: '#888888' }}>
             {suggestion.description}
           </p>
-
-          {/* Target Info */}
-          {suggestion.targetInfo && (
-            <div className="flex items-center gap-2 mb-2">
-              {suggestion.targetInfo.ip && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded"
-                  style={{ background: "#2a2a2a", color: "#4a9eff" }}
-                >
-                  {suggestion.targetInfo.ip}
-                  {suggestion.targetInfo.port && `:${suggestion.targetInfo.port}`}
-                </span>
-              )}
-              {suggestion.targetInfo.service && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded"
-                  style={{ background: "#2a2a2a", color: "#888888" }}
-                >
-                  {suggestion.targetInfo.service}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Command Preview */}
-          {suggestion.command && (
-            <code
-              className="block text-xs p-2 rounded"
-              style={{
-                background: "#141414",
-                color: "#4ade80",
-                fontFamily: "'JetBrains Mono', monospace",
-              }}
-            >
-              $ {suggestion.command}
-            </code>
-          )}
-
-          {/* Reason */}
-          {suggestion.reason && (
-            <p className="text-xs mt-2" style={{ color: "#666666" }}>
-              <span style={{ color: "#a78bfa" }}>Why:</span> {suggestion.reason}
-            </p>
-          )}
-        </div>
-
-        {/* Action Arrow */}
-        <motion.div
-          animate={{ x: isHovered ? 4 : 0, opacity: isHovered ? 1 : 0.5 }}
-          className="flex-shrink-0"
-        >
-          <ChevronRight className="w-5 h-5" style={{ color: "#888888" }} />
-        </motion.div>
+        )}
+        {suggestion.command && (
+          <code
+            className="inline-block text-xs mt-1.5 px-2 py-1 rounded"
+            style={{
+              background: 'rgba(0, 0, 0, 0.3)',
+              color: '#4a9eff',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            {suggestion.command}
+          </code>
+        )}
+        {suggestion.reason && (
+          <p className="text-xs mt-1 italic" style={{ color: '#666666' }}>
+            💡 {suggestion.reason}
+          </p>
+        )}
       </div>
-    </div>
+
+      {/* Arrow */}
+      <ArrowRight 
+        className="w-4 h-4 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" 
+        style={{ color: '#888888' }} 
+      />
+    </button>
   );
 }
 
-// Loading Skeleton
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-2 p-2">
-      {[1, 2, 3].map((i) => (
-        <div
-          key={i}
-          className="p-3 rounded-lg animate-pulse"
-          style={{ background: "rgba(255, 255, 255, 0.02)" }}
-        >
-          <div className="flex items-start gap-3">
-            <div
-              className="w-9 h-9 rounded-lg"
-              style={{ background: "#2a2a2a" }}
-            />
-            <div className="flex-1">
-              <div
-                className="h-4 rounded mb-2"
-                style={{ background: "#2a2a2a", width: "60%" }}
-              />
-              <div
-                className="h-3 rounded"
-                style={{ background: "#2a2a2a", width: "80%" }}
-              />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Compact Suggestions (Inline Display)
-interface CompactSuggestionsProps {
-  suggestions: SuggestedAction[];
-  onExecute: (action: SuggestedAction) => void;
-  maxVisible?: number;
-  className?: string;
-}
-
-export function CompactSuggestions({
+// Compact inline suggestion pills for chat
+export function SuggestionPills({
   suggestions,
-  onExecute,
-  maxVisible = 3,
-  className,
-}: CompactSuggestionsProps) {
-  const visibleSuggestions = suggestions.slice(0, maxVisible);
-
-  if (visibleSuggestions.length === 0) {
-    return null;
-  }
+  onSelect,
+  maxShow = 3,
+}: {
+  suggestions: SuggestedAction[];
+  onSelect: (suggestion: SuggestedAction) => void;
+  maxShow?: number;
+}) {
+  const displaySuggestions = suggestions.slice(0, maxShow);
+  const hasMore = suggestions.length > maxShow;
 
   return (
-    <div className={cn("flex flex-wrap gap-2", className)}>
-      {visibleSuggestions.map((suggestion) => (
+    <div className="flex flex-wrap gap-2">
+      {displaySuggestions.map((suggestion) => (
         <button
           key={suggestion.id}
-          onClick={() => onExecute(suggestion)}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-all duration-200"
+          onClick={() => onSelect(suggestion)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all"
           style={{
-            background: "rgba(42, 42, 42, 0.8)",
-            border: "1px solid rgba(255, 255, 255, 0.06)",
-            color: "#888888",
+            background: 'rgba(251, 191, 36, 0.1)',
+            color: '#fbbf24',
+            border: '1px solid rgba(251, 191, 36, 0.2)',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(52, 52, 52, 0.9)";
-            e.currentTarget.style.color = "#e8e8e8";
+            e.currentTarget.style.background = 'rgba(251, 191, 36, 0.2)';
+            e.currentTarget.style.borderColor = 'rgba(251, 191, 36, 0.3)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(42, 42, 42, 0.8)";
-            e.currentTarget.style.color = "#888888";
+            e.currentTarget.style.background = 'rgba(251, 191, 36, 0.1)';
+            e.currentTarget.style.borderColor = 'rgba(251, 191, 36, 0.2)';
           }}
         >
-          <Sparkles className="w-3 h-3" style={{ color: "#a78bfa" }} />
+          <Lightbulb className="w-3 h-3" />
           <span>{suggestion.title}</span>
         </button>
       ))}
+      {hasMore && (
+        <span className="text-xs py-1.5" style={{ color: '#888888' }}>
+          +{suggestions.length - maxShow} more
+        </span>
+      )}
     </div>
   );
 }

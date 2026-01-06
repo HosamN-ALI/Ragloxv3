@@ -96,6 +96,10 @@ class Blackboard:
         except Exception:
             return False
     
+    def is_connected(self) -> bool:
+        """Check if Blackboard is connected to Redis."""
+        return self._connected
+    
     @property
     def redis(self) -> aioredis.Redis:
         """Get Redis client (raises if not connected)."""

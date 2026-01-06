@@ -212,8 +212,21 @@ class OrganizationRepository(BaseRepository[Organization]):
     
     def _record_to_entity(self, record: Any) -> Optional[Organization]:
         """Convert database record to Organization entity."""
+        import json
+        
         if not record:
             return None
+        
+        # Parse JSON fields that might be strings
+        def parse_json_field(value, default):
+            if value is None:
+                return default
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    return default
+            return value
         
         return Organization(
             id=record["id"],
@@ -233,8 +246,8 @@ class OrganizationRepository(BaseRepository[Organization]):
             status=record.get("status", "active"),
             is_trial=record.get("is_trial", True),
             trial_ends_at=record.get("trial_ends_at"),
-            settings=record.get("settings", {}),
-            metadata=record.get("metadata", {}),
+            settings=parse_json_field(record.get("settings"), {}),
+            metadata=parse_json_field(record.get("metadata"), {}),
             created_at=record.get("created_at"),
             updated_at=record.get("updated_at"),
         )

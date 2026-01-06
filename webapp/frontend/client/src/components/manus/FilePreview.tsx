@@ -1,214 +1,209 @@
 // RAGLOX v3.0 - File Preview Component
-// Preview generated file content with syntax highlighting
-// Based on Manus.im design
+// Inline file preview in chat with syntax highlighting and copy functionality
+// Part of the Chat UX features per development plan
 
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
-  FileCode,
-  FileJson,
-  File,
   Copy,
   Check,
-  Download,
-  ExternalLink,
   ChevronDown,
   ChevronUp,
-  Maximize2,
-  X
+  Download,
+  ExternalLink,
+  Code,
+  FileCode,
+  FileLock,
+  FileJson,
+  FileType,
+  FileTerminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-export interface FileData {
-  id: string;
-  name: string;
-  type: "text" | "code" | "json" | "markdown" | "csv" | "unknown";
+interface FilePreviewProps {
+  filename: string;
   content: string;
   language?: string;
-  path?: string;
-  size?: number;
-  createdAt?: string;
-}
-
-interface FilePreviewProps {
-  file: FileData;
-  maxLines?: number;
-  showFullButton?: boolean;
-  onViewFull?: (file: FileData) => void;
-  onDownload?: (file: FileData) => void;
+  isExpandedByDefault?: boolean;
+  maxPreviewLines?: number;
+  onDownload?: () => void;
+  onOpenExternal?: () => void;
   className?: string;
 }
 
 export function FilePreview({
-  file,
-  maxLines = 10,
-  showFullButton = true,
-  onViewFull,
+  filename,
+  content,
+  language,
+  isExpandedByDefault = false,
+  maxPreviewLines = 10,
   onDownload,
+  onOpenExternal,
   className,
 }: FilePreviewProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(isExpandedByDefault);
   const [copied, setCopied] = useState(false);
 
-  // Split content into lines
-  const lines = useMemo(() => file.content.split("\n"), [file.content]);
-  const totalLines = lines.length;
-  const hasMoreLines = totalLines > maxLines;
-  
-  // Display lines based on expanded state
-  const displayLines = useMemo(() => {
-    if (isExpanded || !hasMoreLines) {
-      return lines;
+  // Detect language from file extension if not provided
+  const detectedLanguage = useMemo(() => {
+    if (language) return language;
+    const ext = filename.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'py': return 'python';
+      case 'js': return 'javascript';
+      case 'ts': return 'typescript';
+      case 'tsx': return 'typescript';
+      case 'jsx': return 'javascript';
+      case 'json': return 'json';
+      case 'yaml':
+      case 'yml': return 'yaml';
+      case 'sh':
+      case 'bash': return 'bash';
+      case 'conf':
+      case 'cfg': return 'config';
+      case 'sql': return 'sql';
+      case 'xml': return 'xml';
+      case 'html': return 'html';
+      case 'css': return 'css';
+      case 'md': return 'markdown';
+      case 'txt': return 'text';
+      default: return 'text';
     }
-    return lines.slice(0, maxLines);
-  }, [lines, isExpanded, hasMoreLines, maxLines]);
+  }, [filename, language]);
 
-  // Get file icon based on type
+  // Get appropriate icon for file type
   const FileIcon = useMemo(() => {
-    switch (file.type) {
-      case "code":
+    switch (detectedLanguage) {
+      case 'python':
+      case 'javascript':
+      case 'typescript':
         return FileCode;
-      case "json":
+      case 'json':
         return FileJson;
-      case "text":
-      case "markdown":
+      case 'bash':
+        return FileTerminal;
+      case 'config':
+        return FileLock;
+      default:
         return FileText;
-      default:
-        return File;
     }
-  }, [file.type]);
+  }, [detectedLanguage]);
 
-  // Get language color
-  const getLanguageColor = () => {
-    switch (file.language?.toLowerCase()) {
-      case "python":
-        return "#3572A5";
-      case "javascript":
-      case "js":
-        return "#f1e05a";
-      case "typescript":
-      case "ts":
-        return "#2b7489";
-      case "json":
-        return "#292929";
-      case "bash":
-      case "shell":
-        return "#4eaa25";
-      case "yaml":
-      case "yml":
-        return "#cb171e";
-      default:
-        return "#888888";
-    }
-  };
+  // Split content into lines
+  const lines = useMemo(() => content.split('\n'), [content]);
+  const totalLines = lines.length;
+  const previewLines = lines.slice(0, maxPreviewLines);
+  const hasMoreLines = totalLines > maxPreviewLines;
 
-  // Copy to clipboard
+  // Handle copy
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(file.content);
+      await navigator.clipboard.writeText(content);
       setCopied(true);
-      toast.success("Copied to clipboard");
+      toast.success("File content copied to clipboard");
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      toast.error("Failed to copy");
+      toast.error("Failed to copy content");
     }
-  };
-
-  // Download file
-  const handleDownload = () => {
-    if (onDownload) {
-      onDownload(file);
-      return;
-    }
-
-    // Default download behavior
-    const blob = new Blob([file.content], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success(`Downloaded ${file.name}`);
   };
 
   return (
     <div
-      className={cn("rounded-xl overflow-hidden", className)}
+      className={cn(
+        "rounded-xl overflow-hidden",
+        className
+      )}
       style={{
-        background: "#1f1f1f",
-        border: "1px solid rgba(255, 255, 255, 0.06)",
-        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
+        background: '#1a1a1a',
+        border: '1px solid rgba(255,255,255,0.08)',
       }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3"
-        style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.06)" }}
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
       >
-        <div className="flex items-center gap-3 min-w-0">
-          {/* File Icon */}
+        <div className="flex items-center gap-3">
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: "rgba(74, 158, 255, 0.15)" }}
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: 'rgba(74, 158, 255, 0.15)' }}
           >
-            <FileIcon className="w-4 h-4" style={{ color: "#4a9eff" }} />
+            <FileIcon className="w-4 h-4" style={{ color: '#4a9eff' }} />
           </div>
-
-          {/* File Info */}
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span
-                className="text-sm font-medium truncate"
-                style={{ color: "#e8e8e8" }}
-              >
-                {file.name}
-              </span>
-              {file.language && (
-                <span
-                  className="px-1.5 py-0.5 rounded text-xs"
-                  style={{
-                    background: `${getLanguageColor()}20`,
-                    color: getLanguageColor(),
-                  }}
-                >
-                  {file.language}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs" style={{ color: "#666666" }}>
-                {totalLines} lines
-              </span>
-              {file.size && (
-                <span className="text-xs" style={{ color: "#666666" }}>
-                  • {formatFileSize(file.size)}
-                </span>
-              )}
-            </div>
+          <div>
+            <span className="font-medium text-sm" style={{ color: '#e8e8e8' }}>
+              {filename}
+            </span>
+            <span className="text-xs ml-2" style={{ color: '#666666' }}>
+              {totalLines} lines • {detectedLanguage}
+            </span>
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-1">
-          <ActionButton onClick={handleCopy} title="Copy">
+          {/* Copy Button */}
+          <button
+            onClick={handleCopy}
+            className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
+            style={{ color: '#888888' }}
+            title="Copy content"
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
             {copied ? (
-              <Check className="w-3.5 h-3.5" style={{ color: "#4ade80" }} />
+              <Check className="w-3.5 h-3.5" style={{ color: '#4ade80' }} />
             ) : (
               <Copy className="w-3.5 h-3.5" />
             )}
-          </ActionButton>
-          <ActionButton onClick={handleDownload} title="Download">
-            <Download className="w-3.5 h-3.5" />
-          </ActionButton>
-          {showFullButton && onViewFull && (
-            <ActionButton onClick={() => onViewFull(file)} title="View Full">
-              <Maximize2 className="w-3.5 h-3.5" />
-            </ActionButton>
+          </button>
+
+          {/* Download Button */}
+          {onDownload && (
+            <button
+              onClick={onDownload}
+              className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
+              style={{ color: '#888888' }}
+              title="Download file"
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Open External Button */}
+          {onOpenExternal && (
+            <button
+              onClick={onOpenExternal}
+              className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
+              style={{ color: '#888888' }}
+              title="Open in editor"
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Expand/Collapse Button */}
+          {hasMoreLines && (
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
+              style={{ color: '#888888' }}
+              title={isExpanded ? "Collapse" : "Expand"}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              {isExpanded ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </button>
           )}
         </div>
       </div>
@@ -217,164 +212,132 @@ export function FilePreview({
       <div
         className="overflow-auto"
         style={{
-          background: "#141414",
-          maxHeight: isExpanded ? "400px" : "auto",
+          backgroundColor: '#0d0d0d',
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+          fontSize: '13px',
+          lineHeight: '1.6',
+          maxHeight: isExpanded ? '400px' : 'auto',
         }}
       >
-        <pre
-          className="p-4 text-xs leading-relaxed"
-          style={{
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            color: "#a0a0a0",
-            margin: 0,
-          }}
-        >
-          <code>
-            {displayLines.map((line, index) => (
-              <div key={index} className="flex">
-                <span
-                  className="select-none pr-4 text-right"
-                  style={{ color: "#444444", minWidth: "40px" }}
-                >
-                  {index + 1}
-                </span>
-                <span style={{ color: "#e8e8e8" }}>{line || " "}</span>
-              </div>
-            ))}
-          </code>
-        </pre>
+        <div className="p-4">
+          {(isExpanded ? lines : previewLines).map((line, index) => (
+            <div key={index} className="flex">
+              {/* Line number */}
+              <span
+                className="select-none text-right pr-4 min-w-[3rem]"
+                style={{ color: '#555555' }}
+              >
+                {index + 1}
+              </span>
+              {/* Line content */}
+              <SyntaxHighlightedLine
+                line={line}
+                language={detectedLanguage}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Expand/Collapse Button */}
-      {hasMoreLines && (
+      {/* Show More indicator */}
+      {!isExpanded && hasMoreLines && (
         <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full flex items-center justify-center gap-2 py-2.5 text-xs transition-colors"
+          onClick={() => setIsExpanded(true)}
+          className="w-full py-2 text-xs flex items-center justify-center gap-2 transition-colors"
           style={{
-            borderTop: "1px solid rgba(255, 255, 255, 0.06)",
-            color: "#888888",
+            background: 'rgba(0, 0, 0, 0.3)',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            color: '#888888',
           }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "rgba(255,255,255,0.04)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
+          onMouseEnter={(e) => e.currentTarget.style.color = '#4a9eff'}
+          onMouseLeave={(e) => e.currentTarget.style.color = '#888888'}
         >
-          {isExpanded ? (
-            <>
-              <ChevronUp className="w-4 h-4" />
-              Show Less
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-4 h-4" />
-              Show More ({totalLines - maxLines} more lines)
-            </>
-          )}
+          <ChevronDown className="w-3 h-3" />
+          Show {totalLines - maxPreviewLines} more lines
         </button>
       )}
     </div>
   );
 }
 
-// Action Button Component
-interface ActionButtonProps {
-  onClick: () => void;
-  title?: string;
-  children: React.ReactNode;
+// Simple syntax highlighting component
+function SyntaxHighlightedLine({ line, language }: { line: string; language: string }) {
+  // Basic syntax highlighting patterns
+  const highlightedContent = useMemo(() => {
+    if (!line) return <span style={{ color: '#a0a0a0' }}>{' '}</span>;
+
+    // Comment patterns
+    const commentPatterns = [
+      { pattern: /^(\s*#.*)$/, color: '#6a737d' },
+      { pattern: /^(\s*\/\/.*)$/, color: '#6a737d' },
+      { pattern: /(["'])(?:(?=(\\?))\2.)*?\1/g, color: '#98c379' }, // Strings
+    ];
+
+    // Keywords
+    const keywords = /\b(import|from|def|class|if|else|elif|return|for|while|try|except|finally|with|as|in|not|and|or|is|None|True|False|const|let|var|function|export|default|async|await)\b/g;
+    
+    // Check for comments first
+    if (line.trim().startsWith('#') || line.trim().startsWith('//')) {
+      return <span style={{ color: '#6a737d' }}>{line}</span>;
+    }
+
+    // Basic highlighting
+    let result = line;
+
+    return (
+      <span
+        className="whitespace-pre-wrap"
+        style={{ color: '#a0a0a0' }}
+        dangerouslySetInnerHTML={{
+          __html: line
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            // Strings
+            .replace(/(["'`])(?:(?!\1)[^\\]|\\.)*\1/g, '<span style="color:#98c379">$&</span>')
+            // Keywords
+            .replace(/\b(import|from|def|class|if|else|elif|return|for|while|try|except|finally|with|as|in|not|and|or|is|None|True|False|const|let|var|function|export|default|async|await|interface|type|enum)\b/g, '<span style="color:#c678dd">$&</span>')
+            // Numbers
+            .replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#d19a66">$&</span>')
+            // Functions
+            .replace(/(\w+)(?=\s*\()/g, '<span style="color:#61afef">$&</span>')
+        }}
+      />
+    );
+  }, [line, language]);
+
+  return highlightedContent;
 }
 
-function ActionButton({ onClick, title, children }: ActionButtonProps) {
+// Compact file badge for chat
+export function FileBadge({
+  filename,
+  onClick,
+}: {
+  filename: string;
+  onClick?: () => void;
+}) {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  
   return (
     <button
       onClick={onClick}
-      title={title}
-      className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
-      style={{ color: "#888888" }}
+      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors"
+      style={{
+        background: 'rgba(74, 158, 255, 0.1)',
+        color: '#4a9eff',
+        border: '1px solid rgba(74, 158, 255, 0.2)',
+      }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "rgba(255,255,255,0.08)";
-        e.currentTarget.style.color = "#e8e8e8";
+        e.currentTarget.style.background = 'rgba(74, 158, 255, 0.2)';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "#888888";
+        e.currentTarget.style.background = 'rgba(74, 158, 255, 0.1)';
       }}
     >
-      {children}
+      <FileText className="w-3 h-3" />
+      <span>{filename}</span>
     </button>
-  );
-}
-
-// File Size Formatter
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
-
-// Full File Viewer Modal
-interface FileViewerModalProps {
-  file: FileData | null;
-  onClose: () => void;
-}
-
-export function FileViewerModal({ file, onClose }: FileViewerModalProps) {
-  if (!file) return null;
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ background: "rgba(0, 0, 0, 0.8)" }}
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-xl"
-          style={{ background: "#1a1a1a" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Modal Header */}
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.06)" }}
-          >
-            <div className="flex items-center gap-2">
-              <FileText className="w-5 h-5" style={{ color: "#4a9eff" }} />
-              <span className="font-medium" style={{ color: "#e8e8e8" }}>
-                {file.name}
-              </span>
-            </div>
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded flex items-center justify-center transition-colors"
-              style={{ color: "#888888" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "rgba(255,255,255,0.08)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Modal Content */}
-          <div className="overflow-auto" style={{ maxHeight: "calc(90vh - 60px)" }}>
-            <FilePreview file={file} maxLines={1000} showFullButton={false} />
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
   );
 }
 

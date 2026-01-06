@@ -247,11 +247,23 @@ export function useWebSocket(
         setEvents((prev) => [eventCard, ...prev].slice(0, MAX_EVENTS_DISPLAY));
         break;
 
+      case "terminal_output":
+        // Handle dedicated terminal output events
+        {
+          const termData = data as { command?: string; output?: string; status?: string };
+          if (termData.output) {
+            const lines = termData.output.split('\n').filter(line => line.length > 0);
+            setTerminalOutput((prev) => [...prev, ...lines]);
+          }
+          // Don't add terminal_output to events (too noisy)
+        }
+        break;
+
       default:
         // Generic event handling
         setEvents((prev) => [eventCard, ...prev].slice(0, MAX_EVENTS_DISPLAY));
 
-        // Check for terminal output
+        // Check for terminal output in generic events
         if ((data as { output?: string }).output) {
           const output = (data as { output: string }).output;
           setTerminalOutput((prev) => [...prev, ...output.split('\n')]);

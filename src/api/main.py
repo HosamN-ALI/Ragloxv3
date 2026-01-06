@@ -195,11 +195,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 ssl=settings.msf_rpc_ssl
             )
             
-            # Test connection
-            if metasploit_adapter.connect():
+            # Test connection (connect is async)
+            if await metasploit_adapter.connect():
                 logger.info("✅ Metasploit RPC Connected Successfully")
-                version = metasploit_adapter.get_version()
-                exploits = metasploit_adapter.list_exploits()
+                version = await metasploit_adapter.get_version()
+                exploits = await metasploit_adapter.list_exploits()
                 logger.info(f"   Metasploit Version: {version}")
                 logger.info(f"   Available Modules: {len(exploits) if exploits else 0}")
                 
@@ -559,7 +559,7 @@ def create_app() -> FastAPI:
     app.include_router(infrastructure_router, prefix="/api/v1")  # SSH & Cloud Infrastructure
     app.include_router(workflow_router, prefix="/api/v1")  # Advanced Workflow Orchestration
     app.include_router(billing_router, prefix="/api/v1")  # SaaS Billing & Subscriptions
-    app.include_router(terminal_router)  # Terminal, Commands & Suggestions
+    app.include_router(terminal_router, prefix="/api/v1")  # Terminal, Commands & Suggestions
     app.include_router(websocket_router)
     
     return app
