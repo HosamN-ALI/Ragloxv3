@@ -1733,25 +1733,32 @@ class MissionController:
                                             
                                             # Start VM provisioning in background
                                             from ..api.auth_routes import provision_user_vm, VMConfiguration
+                                            from uuid import UUID
                                             import asyncio
                                             
                                             # Update status to pending
                                             try:
+                                                org_id = user_data.get("organization_id")
                                                 await user_repo.update(
-                                                    user_id_str,
+                                                    UUID(user_id_str),
                                                     {"metadata": {"vm_status": "pending"}},
-                                                    user_data.get("organization_id")
+                                                    UUID(str(org_id)) if org_id else None
                                                 )
+                                                self.logger.info(f"Updated VM status to pending for user {user_id_str}")
                                             except Exception as e:
                                                 self.logger.error(f"Failed to update VM status: {e}")
                                             
                                             # Start provisioning (non-blocking)
-                                            asyncio.create_task(provision_user_vm(
-                                                user_id_str,
-                                                str(user_data.get("organization_id")),
-                                                VMConfiguration(),
-                                                user_repo
-                                            ))
+                                            try:
+                                                asyncio.create_task(provision_user_vm(
+                                                    user_id_str,
+                                                    str(user_data.get("organization_id")),
+                                                    VMConfiguration(),
+                                                    user_repo
+                                                ))
+                                                self.logger.info(f"Started VM provisioning task for user {user_id_str}")
+                                            except Exception as e:
+                                                self.logger.error(f"Failed to start provisioning task: {e}")
                                             
                                             self.logger.info(f"VM provisioning started for user {user_id_str}")
                                         
@@ -1778,10 +1785,12 @@ class MissionController:
                                                     self.logger.info(f"VM {vm_id} started successfully")
                                                     
                                                     # Update status
+                                                    from uuid import UUID
+                                                    org_id = user_data.get("organization_id")
                                                     await user_repo.update(
-                                                        user_id_str,
+                                                        UUID(user_id_str),
                                                         {"metadata": {"vm_status": "ready"}},
-                                                        user_data.get("organization_id")
+                                                        UUID(str(org_id)) if org_id else None
                                                     )
                                                     
                                                     # Wait a bit for VM to be ready
