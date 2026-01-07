@@ -10,9 +10,9 @@ from typing import Dict, Any
 class TestMissionApprovals:
     """Test cases for mission approval endpoints."""
 
-    def test_list_pending_approvals_success(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_list_pending_approvals_success(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test that GET /api/v1/missions/{mission_id}/approvals returns 200 OK."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.get(f"/api/v1/missions/{mission_id}/approvals")
         assert response.status_code == 200
         data = response.json()
@@ -27,9 +27,9 @@ class TestMissionApprovals:
             assert "risk_level" in approval
             assert "requested_at" in approval
 
-    def test_list_pending_approvals_empty(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_list_pending_approvals_empty(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test that listing approvals for a new mission returns empty list."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.get(f"/api/v1/missions/{mission_id}/approvals")
         assert response.status_code == 200
         data = response.json()
@@ -42,10 +42,10 @@ class TestMissionApprovals:
         response = authenticated_client.get(f"/api/v1/missions/{mission_id}/approvals")
         assert response.status_code == 404
 
-    def test_approve_action_success(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_approve_action_success(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                    sample_approval_request: Dict[str, Any], action_id: str) -> None:
         """Test that POST /api/v1/missions/{mission_id}/approve/{action_id} returns 200 OK."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         # For a new mission, this action_id won't exist, so we expect 404
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/approve/{action_id}", json=sample_approval_request)
         # Should be 404 for non-existent action or 200 if action exists
@@ -59,10 +59,10 @@ class TestMissionApprovals:
             assert "mission_status" in data
             assert data["action_id"] == action_id
 
-    def test_approve_action_not_found(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_approve_action_not_found(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                      sample_approval_request: Dict[str, Any], action_id: str) -> None:
         """Test that approving a non-existent action returns 404."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/approve/{action_id}", json=sample_approval_request)
         assert response.status_code == 404
 
@@ -72,10 +72,10 @@ class TestMissionApprovals:
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/approve/{action_id}", json=sample_approval_request)
         assert response.status_code == 404
 
-    def test_reject_action_success(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_reject_action_success(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                   sample_rejection_request: Dict[str, Any], action_id: str) -> None:
         """Test that POST /api/v1/missions/{mission_id}/reject/{action_id} returns 200 OK."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         # For a new mission, this action_id won't exist, so we expect 404
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/reject/{action_id}", json=sample_rejection_request)
         # Should be 404 for non-existent action or 200 if action exists
@@ -89,10 +89,10 @@ class TestMissionApprovals:
             assert "mission_status" in data
             assert data["action_id"] == action_id
 
-    def test_reject_action_not_found(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_reject_action_not_found(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                     sample_rejection_request: Dict[str, Any], action_id: str) -> None:
         """Test that rejecting a non-existent action returns 404."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/reject/{action_id}", json=sample_rejection_request)
         assert response.status_code == 404
 
@@ -102,10 +102,10 @@ class TestMissionApprovals:
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/reject/{action_id}", json=sample_rejection_request)
         assert response.status_code == 404
 
-    def test_approve_action_validation_error(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_approve_action_validation_error(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                             action_id: str) -> None:
         """Test that approving with invalid data returns 422."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         # Send invalid JSON
         response = authenticated_client.post(
             f"/api/v1/missions/{mission_id}/approve/{action_id}",
@@ -114,10 +114,10 @@ class TestMissionApprovals:
         # Should be 422 for validation error or 404 if action doesn't exist
         assert response.status_code in [404, 422]
 
-    def test_reject_action_validation_error(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_reject_action_validation_error(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                            action_id: str) -> None:
         """Test that rejecting with invalid data returns 422."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         # Send invalid JSON
         response = authenticated_client.post(
             f"/api/v1/missions/{mission_id}/reject/{action_id}",

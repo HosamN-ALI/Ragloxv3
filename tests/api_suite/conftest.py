@@ -67,7 +67,7 @@ def auth_headers(auth_token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {auth_token}"}
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def authenticated_client(client: httpx.Client, auth_headers: Dict[str, str]) -> httpx.Client:
     """
     HTTP client with authentication headers.
@@ -131,7 +131,7 @@ def tactic_id() -> str:
     return "TA0001"
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def sample_mission_create() -> Dict[str, Any]:
     """Sample mission creation payload."""
     return {

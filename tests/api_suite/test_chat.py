@@ -10,10 +10,10 @@ from typing import Dict, Any
 class TestMissionChat:
     """Test cases for mission chat endpoints."""
 
-    def test_send_chat_message_success(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any], 
+    def test_send_chat_message_success(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any], 
                                       sample_chat_request: Dict[str, Any]) -> None:
         """Test that POST /api/v1/missions/{mission_id}/chat returns 200 OK."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/chat", json=sample_chat_request)
         assert response.status_code == 200
         data = response.json()
@@ -29,9 +29,9 @@ class TestMissionChat:
         assert isinstance(data["id"], str)
         assert isinstance(data["timestamp"], str)
 
-    def test_send_chat_message_with_related_ids(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_send_chat_message_with_related_ids(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test sending a chat message with related task and action IDs."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         chat_request = {
             "content": "Status update for this task",
             "related_task_id": "task-123",
@@ -49,9 +49,9 @@ class TestMissionChat:
         assert isinstance(data["content"], str)
         assert len(data["content"]) > 0
 
-    def test_send_chat_message_validation_error(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_send_chat_message_validation_error(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test that sending a chat message with invalid data returns 422."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         
         # Missing required content field
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/chat", json={})
@@ -72,9 +72,9 @@ class TestMissionChat:
         response = authenticated_client.post(f"/api/v1/missions/{mission_id}/chat", json=sample_chat_request)
         assert response.status_code == 404
 
-    def test_get_chat_history_success(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_get_chat_history_success(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test that GET /api/v1/missions/{mission_id}/chat returns 200 OK."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.get(f"/api/v1/missions/{mission_id}/chat")
         assert response.status_code == 200
         data = response.json()
@@ -88,9 +88,9 @@ class TestMissionChat:
             assert "content" in message
             assert "timestamp" in message
 
-    def test_get_chat_history_with_limit(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_get_chat_history_with_limit(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test getting chat history with a limit parameter."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         response = authenticated_client.get(f"/api/v1/missions/{mission_id}/chat?limit=5")
         assert response.status_code == 200
         data = response.json()
@@ -98,9 +98,9 @@ class TestMissionChat:
         # Should not exceed the limit
         assert len(data) <= 5
 
-    def test_get_chat_history_validation_error(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    def test_get_chat_history_validation_error(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test that getting chat history with invalid limit returns 422."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         
         # Negative limit
         response = authenticated_client.get(f"/api/v1/missions/{mission_id}/chat?limit=-1")
