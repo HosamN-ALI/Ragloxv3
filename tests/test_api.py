@@ -62,10 +62,40 @@ def mock_controller(mock_blackboard):
 @pytest.fixture
 def app_with_mocks(mock_blackboard, mock_controller):
     """Create app with mocked dependencies."""
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Depends
     from fastapi.middleware.cors import CORSMiddleware
-    from src.api.routes import router
+    from src.api.routes import router, get_org_repo
     from src.api.websocket import websocket_router
+    from src.api.auth_routes import get_current_user
+    from uuid import uuid4
+    
+    # Mock authentication - return fake user
+    async def mock_get_current_user():
+        return {
+            "id": str(uuid4()),
+            "organization_id": str(uuid4()),
+            "email": "test@test.com",
+            "username": "testuser",
+            "full_name": "Test User",
+            "role": "admin",
+            "is_active": True,
+            "is_superuser": False,
+            "is_org_owner": True,
+            "metadata": {}
+        }
+    
+    # Mock organization repository - unlimited missions
+    mock_org_repo = AsyncMock()
+    mock_org_repo.can_create_mission = AsyncMock(return_value=True)
+    mock_org_repo.get_current_mission_count = AsyncMock(return_value=0)
+    mock_org_repo.get_by_id = AsyncMock(return_value=MagicMock(
+        max_concurrent_missions=100,
+        plan="enterprise"
+    ))
+    mock_org_repo.increment_mission_count = AsyncMock()
+    
+    async def mock_get_org_repo(request):
+        return mock_org_repo
     
     # Create app without lifespan to avoid connection issues
     app = FastAPI(
@@ -93,6 +123,10 @@ def app_with_mocks(mock_blackboard, mock_controller):
                 "blackboard": "healthy" if blackboard_healthy else "unhealthy"
             }
         }
+    
+    # Override dependencies
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    app.dependency_overrides[get_org_repo] = mock_get_org_repo
     
     # Include routers
     app.include_router(router, prefix="/api/v1")
