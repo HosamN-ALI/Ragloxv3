@@ -493,24 +493,26 @@ async def provision_user_vm(
             # Poll for ready state
             for _ in range(60):  # 5 minutes max
                 await asyncio.sleep(5)
-                vm_status = await vm_manager.get_vm_status(vm_instance.vm_id)
-                if vm_status and vm_status.ipv4:
+                # Refresh VM instance to get updated status
+                vm_instance = await vm_manager.get_vm(vm_instance.vm_id)
+                if vm_instance and (vm_instance.ipv4 or vm_instance.ipv6):
                     break
             
             # Update user with VM details including SSH credentials
             # Note: In production, consider encrypting the password before storage
+            vm_ip = vm_instance.ipv4 or vm_instance.ipv6  # Use IPv4 if available, otherwise IPv6
             await user_repo.update(user_uuid, {
                 "metadata": {
                     "vm_status": VMProvisionStatus.READY.value,
                     "vm_id": vm_instance.vm_id,
-                    "vm_ip": vm_instance.ipv4,
+                    "vm_ip": vm_ip,
                     "vm_ssh_user": "root",  # Default SSH user for OneProvider VMs
                     "vm_ssh_password": vm_password,  # Store password for SSH access
                     "vm_ssh_port": 22,
                 }
             }, org_uuid)
             
-            logger.info(f"VM provisioned for user {user_id}: {vm_instance.ipv4}")
+            logger.info(f"VM provisioned for user {user_id}: {vm_ip}")
         else:
             raise Exception("VM creation returned None")
             
