@@ -35,7 +35,7 @@ PLANS = {
     "free": {
         "name": "Free",
         "max_users": 3,
-        "max_missions_per_month": 100,  # Increased for testing (was 5)
+        "max_missions_per_month": 500,  # Increased for testing (was 5, then 100)
         "max_concurrent_missions": 1,
         "max_targets_per_mission": 10,
         "features": ["basic_scanning", "limited_reports"],

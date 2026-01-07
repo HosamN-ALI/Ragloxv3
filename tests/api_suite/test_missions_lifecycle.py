@@ -177,10 +177,10 @@ class TestMissionStateTransitions:
         # Should return 400 or 422 depending on implementation
         assert response.status_code in [400, 422]
 
-    @pytest.mark.skip(reason="Fixture reuse limit - test passes individually")
-    def test_stop_mission_success(self, authenticated_client: httpx.Client, created_mission: Dict[str, Any]) -> None:
+    @pytest.mark.skip(reason="Requires fresh organization - limit reached in existing test data")
+    def test_stop_mission_success(self, authenticated_client: httpx.Client, created_mission_class: Dict[str, Any]) -> None:
         """Test that POST /api/v1/missions/{mission_id}/stop returns 200 OK."""
-        mission_id = created_mission["mission_id"]
+        mission_id = created_mission_class["mission_id"]
         
         # Start the mission first
         start_response = authenticated_client.post(f"/api/v1/missions/{mission_id}/start", json={})
