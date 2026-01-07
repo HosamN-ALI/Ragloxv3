@@ -88,9 +88,9 @@ class OneProviderClient:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={
-                    "X-API-KEY": self.api_key,
-                    "X-CLIENT-KEY": self.client_key,
-                    "Content-Type": "application/json",
+                    "Api-Key": self.api_key,
+                    "Client-Key": self.client_key,
+                    "User-Agent": "OneApi/1.0",
                     "Accept": "application/json"
                 },
                 timeout=aiohttp.ClientTimeout(total=self.timeout)

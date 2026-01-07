@@ -1,0 +1,67 @@
+{
+  "total": 10,
+  "passed": 7,
+  "failed": 3,
+  "tests": [
+    {
+      "name": "OneProvider API connectivity (correct headers)",
+      "passed": true,
+      "details": "Projects: 1",
+      "timestamp": "2026-01-07T05:35:14.381393"
+    },
+    {
+      "name": "OneProviderClient headers",
+      "passed": true,
+      "details": "Using correct headers",
+      "timestamp": "2026-01-07T05:35:14.395990"
+    },
+    {
+      "name": "List available VM plans",
+      "passed": true,
+      "details": "Found 46 plans. devd20c1 exists: True",
+      "timestamp": "2026-01-07T05:35:16.398866"
+    },
+    {
+      "name": "List available OS templates",
+      "passed": false,
+      "details": "'dict' object has no attribute 'lower'",
+      "timestamp": "2026-01-07T05:35:16.847387"
+    },
+    {
+      "name": "List existing VMs",
+      "passed": true,
+      "details": "Found 0 existing VMs",
+      "timestamp": "2026-01-07T05:35:17.393388"
+    },
+    {
+      "name": "Configuration loading",
+      "passed": false,
+      "details": "Checks: {'oneprovider_enabled': False, 'has_api_key': False, 'has_client_key': False, 'has_project_uuid': False, 'default_plan': '8GB-2CORE'}",
+      "timestamp": "2026-01-07T05:35:17.702487"
+    },
+    {
+      "name": "User repository operations",
+      "passed": false,
+      "details": "'Settings' object has no attribute 'redis_host'",
+      "timestamp": "2026-01-07T05:35:17.763811"
+    },
+    {
+      "name": "VM Manager initialization",
+      "passed": true,
+      "details": "Project UUID: ",
+      "timestamp": "2026-01-07T05:35:17.763904"
+    },
+    {
+      "name": "Create VM configuration validation",
+      "passed": true,
+      "details": "Config: devd20c1, ubuntu, us-east",
+      "timestamp": "2026-01-07T05:35:17.763984"
+    },
+    {
+      "name": "Provision workflow trace",
+      "passed": true,
+      "details": "Traced 12 steps",
+      "timestamp": "2026-01-07T05:35:17.764027"
+    }
+  ]
+}
