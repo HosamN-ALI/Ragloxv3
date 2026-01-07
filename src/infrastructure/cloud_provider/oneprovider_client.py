@@ -108,6 +108,7 @@ class OneProviderClient:
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
         retry_count: int = 0
     ) -> Dict[str, Any]:
         """
@@ -118,6 +119,7 @@ class OneProviderClient:
             endpoint: API endpoint
             params: Query parameters
             json: JSON body
+            data: Form data body (for application/x-www-form-urlencoded)
             retry_count: Current retry count
         
         Returns:
@@ -133,11 +135,24 @@ class OneProviderClient:
         try:
             logger.debug(f"OneProvider API: {method} {url}")
             
+            # Prepare request kwargs
+            request_kwargs = {
+                "params": params
+            }
+            
+            # Add body based on content type
+            if data is not None:
+                # Form data (application/x-www-form-urlencoded)
+                request_kwargs["data"] = data
+                request_kwargs["headers"] = {"Content-Type": "application/x-www-form-urlencoded"}
+            elif json is not None:
+                # JSON data
+                request_kwargs["json"] = json
+            
             async with self._session.request(
                 method,
                 url,
-                params=params,
-                json=json
+                **request_kwargs
             ) as response:
                 # Read response text
                 text = await response.text()
@@ -166,6 +181,7 @@ class OneProviderClient:
                             endpoint,
                             params,
                             json,
+                            data,
                             retry_count + 1
                         )
                     
@@ -194,6 +210,7 @@ class OneProviderClient:
                     endpoint,
                     params,
                     json,
+                    data,
                     retry_count + 1
                 )
             
@@ -294,43 +311,64 @@ class OneProviderClient:
         auto_backups: bool = False
     ) -> Dict[str, Any]:
         """
-        Create a new VM
+        Create a new VM using OneProvider API
         
         Args:
-            project_uuid: Project UUID
+            project_uuid: Project UUID (not used by OneProvider, kept for compatibility)
             hostname: VM hostname
-            plan_id: Plan/size ID (e.g., "8GB-2CORE")
-            os_id: Operating system ID
-            location_id: Datacenter location ID
+            plan_id: Plan/size ID (e.g., "86" for devd20c1)
+            os_id: Operating system template ID (e.g., "1197" for Ubuntu 22.04)
+            location_id: Datacenter location ID (e.g., "34" for Paris)
             ssh_keys: List of SSH key IDs
-            password: Root password
-            ipv6: Enable IPv6
-            private_network: Enable private networking
-            auto_backups: Enable automatic backups
+            password: Root password (optional, auto-generated if not provided)
+            ipv6: Enable IPv6 (default: False)
+            private_network: Enable private networking (not used)
+            auto_backups: Enable automatic backups (not used)
         
         Returns:
-            Created VM details
+            Created VM details with keys:
+                - id: VM ID
+                - ip_address: IPv4 or IPv6 address
+                - hostname: VM hostname
+                - password: Root password
+        
+        Note:
+            OneProvider API uses application/x-www-form-urlencoded format
+            Field names are: location_id, instance_size, template, hostname
         """
-        payload = {
-            "project_uuid": project_uuid,
-            "hostname": hostname,
-            "plan_id": plan_id,
-            "os_id": os_id,
-            "location_id": location_id,
-            "ipv6": ipv6,
-            "private_network": private_network,
-            "auto_backups": auto_backups
+        # Build form data with correct field names
+        form_data = {
+            "location_id": str(location_id),      # Required: datacenter location
+            "instance_size": str(plan_id),         # Required: VM size/plan
+            "template": str(os_id),                # Required: OS template ID
+            "hostname": hostname                   # Required: VM hostname
         }
         
-        if ssh_keys:
-            payload["ssh_keys"] = ssh_keys
+        # Optional password (auto-generated if not provided)
         if password:
-            payload["password"] = password
+            form_data["password"] = password
         
-        data = await self._request("POST", "/vm/create", json=payload)
+        # Make API request with form data
+        response = await self._request("POST", "/vm/create", data=form_data)
         
-        logger.info(f"Created VM: {hostname} (ID: {data.get('vm_id')})")
-        return data
+        # Parse response
+        if response.get("result") == "success":
+            vm_data = response.get("response", {})
+            vm_id = vm_data.get("id")
+            
+            logger.info(f"Created VM: {hostname} (ID: {vm_id})")
+            
+            # Return standardized format
+            return {
+                "vm_id": vm_id,
+                "ip_address": vm_data.get("ip_address"),
+                "hostname": vm_data.get("hostname"),
+                "password": vm_data.get("password"),
+                "status": "creating"
+            }
+        else:
+            error_msg = response.get("error", {}).get("message", "Unknown error")
+            raise OneProviderError(f"Failed to create VM: {error_msg}")
     
     async def destroy_vm(
         self,
@@ -347,12 +385,12 @@ class OneProviderClient:
         Returns:
             Destruction status
         """
-        payload = {
+        form_data = {
             "vm_id": vm_id,
-            "confirm_close": confirm_close
+            "confirm_close": str(confirm_close).lower()
         }
         
-        data = await self._request("POST", "/vm/destroy", json=payload)
+        data = await self._request("POST", "/vm/destroy", data=form_data)
         
         logger.info(f"Destroyed VM: {vm_id}")
         return data
