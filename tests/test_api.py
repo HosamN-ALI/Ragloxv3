@@ -135,6 +135,7 @@ def app_with_mocks(mock_blackboard, mock_controller):
     # Override app state
     app.state.blackboard = mock_blackboard
     app.state.controller = mock_controller
+    app.state.org_repo = mock_org_repo  # Add org_repo to state
     
     return app
 

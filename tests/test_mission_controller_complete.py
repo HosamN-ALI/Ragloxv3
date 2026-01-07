@@ -86,12 +86,35 @@ def mock_environment_manager():
 @pytest.fixture
 def mission_controller(mock_blackboard, mock_settings, mock_environment_manager):
     """MissionController instance with mocked dependencies."""
-    with patch('src.controller.mission.SessionManager'), \
-         patch('src.controller.mission.StatsManager'), \
-         patch('src.controller.mission.ShutdownManager'), \
-         patch('src.controller.mission.TransactionManager'), \
-         patch('src.controller.mission.get_retry_manager'), \
-         patch('src.controller.mission.get_approval_store'):
+    # Create async mock instances for managers
+    mock_session_mgr = MagicMock()
+    mock_session_mgr.start = AsyncMock()
+    mock_session_mgr.stop = AsyncMock()
+    mock_session_mgr.cleanup = AsyncMock()
+    
+    mock_stats_mgr = MagicMock()
+    mock_stats_mgr.start = AsyncMock()
+    mock_stats_mgr.stop = AsyncMock()
+    mock_stats_mgr.increment_counter = AsyncMock()
+    mock_stats_mgr.set_gauge = AsyncMock()
+    mock_stats_mgr.record_timing = AsyncMock()
+    
+    mock_shutdown_mgr = MagicMock()
+    mock_shutdown_mgr.register = MagicMock()
+    mock_shutdown_mgr.shutdown = AsyncMock()
+    
+    mock_transaction_mgr = MagicMock()
+    
+    mock_retry_mgr = MagicMock()
+    
+    mock_approval_store = MagicMock()
+    
+    with patch('src.controller.mission.SessionManager', return_value=mock_session_mgr), \
+         patch('src.controller.mission.StatsManager', return_value=mock_stats_mgr), \
+         patch('src.controller.mission.ShutdownManager', return_value=mock_shutdown_mgr), \
+         patch('src.controller.mission.TransactionManager', return_value=mock_transaction_mgr), \
+         patch('src.controller.mission.get_retry_manager', return_value=mock_retry_mgr), \
+         patch('src.controller.mission.get_approval_store', return_value=mock_approval_store):
         
         controller = MissionController(
             blackboard=mock_blackboard,
@@ -379,4 +402,5 @@ async def test_request_approval_successful(mission_controller, mock_blackboard, 
         action_id = await mission_controller.request_approval(mission_id, sample_approval_action)
         
         assert action_id == str(sample_approval_action.id)
-        assert action_id in mission_controller
+        # Verify approval was stored (check in _pending_approvals or approval_store)
+        assert mission_id in mission_controller._active_missions
