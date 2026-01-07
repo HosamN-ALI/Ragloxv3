@@ -39,7 +39,7 @@ class ProductionTestBase:
         """
         return get_config()
     
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     async def real_database(self, config: ProductionTestConfig) -> AsyncGenerator:
         """
         Real PostgreSQL database connection.
