@@ -68,11 +68,13 @@ class UserStatus(str, Enum):
 
 class VMProvisionStatus(str, Enum):
     """VM provisioning status"""
-    PENDING = "pending"
-    CREATING = "creating"
-    CONFIGURING = "configuring"
-    READY = "ready"
-    FAILED = "failed"
+    NOT_CREATED = "not_created"  # VM not yet created (lazy provisioning)
+    PENDING = "pending"          # VM creation queued
+    CREATING = "creating"        # VM being created
+    CONFIGURING = "configuring"  # VM created, waiting for IP
+    READY = "ready"              # VM ready with IP
+    FAILED = "failed"            # VM creation failed
+    STOPPED = "stopped"          # VM stopped (hibernation)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -638,7 +640,7 @@ async def register(
         role="admin" if is_org_owner else "operator",
         is_active=True,
         is_org_owner=is_org_owner,
-        metadata={"vm_status": VMProvisionStatus.PENDING.value},
+        metadata={"vm_status": VMProvisionStatus.NOT_CREATED.value},  # Changed: Lazy provisioning
     )
     
     user = await user_repo.create(new_user)
@@ -650,17 +652,13 @@ async def register(
         token_store
     )
     
-    # Start VM provisioning in background
-    vm_config = data.vm_config or VMConfiguration()
-    background_tasks.add_task(
-        provision_user_vm,
-        str(user.id),
-        str(user.organization_id),
-        vm_config,
-        user_repo
-    )
+    # ═══════════════════════════════════════════════════════════════
+    # LAZY PROVISIONING: VM will be created on first use
+    # ═══════════════════════════════════════════════════════════════
+    # Removed: background_tasks.add_task(provision_user_vm, ...)
+    # VM provisioning now happens when user creates their first mission
     
-    logger.info(f"New user registered: {user.email} in org {org_name}")
+    logger.info(f"New user registered: {user.email} in org {org_name} (VM: lazy provisioning)")
     
     return TokenResponse(
         access_token=access_token,
@@ -672,7 +670,7 @@ async def register(
             organization_id=str(user.organization_id),
             organization_name=org_name,
             role=user.role,
-            status="pending",
+            status="active",  # Changed: User is immediately active
             vm_status=user.metadata.get("vm_status") if user.metadata else None,
             vm_ip=user.metadata.get("vm_ip") if user.metadata else None,
             created_at=user.created_at or datetime.utcnow(),
@@ -923,11 +921,13 @@ def _get_vm_status_message(status: Optional[str]) -> str:
         return "VM not provisioned"
     
     messages = {
-        VMProvisionStatus.PENDING.value: "VM provisioning queued",
-        VMProvisionStatus.CREATING.value: "Creating your VM instance...",
-        VMProvisionStatus.CONFIGURING.value: "Configuring VM environment...",
-        VMProvisionStatus.READY.value: "VM is ready to use",
-        VMProvisionStatus.FAILED.value: "VM provisioning failed. Please contact support.",
+        VMProvisionStatus.NOT_CREATED.value: "Your execution environment will be created when you start your first mission. You can use simulation mode in the meantime.",
+        VMProvisionStatus.PENDING.value: "VM provisioning queued - will start soon",
+        VMProvisionStatus.CREATING.value: "Setting up your execution environment... This may take 5-10 minutes. You can use simulation mode while waiting.",
+        VMProvisionStatus.CONFIGURING.value: "Configuring VM environment... Almost ready!",
+        VMProvisionStatus.READY.value: "✓ Your execution environment is ready",
+        VMProvisionStatus.FAILED.value: "VM provisioning failed. Please try re-provisioning or contact support.",
+        VMProvisionStatus.STOPPED.value: "VM is in sleep mode - will wake up automatically when needed",
     }
     return messages.get(status, "Unknown status")
 

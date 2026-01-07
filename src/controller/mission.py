@@ -1675,10 +1675,10 @@ class MissionController:
                                 user_environments = await self.environment_manager.list_user_environments(user_id_str)
                                 
                                 # ═══════════════════════════════════════════════════════════
-                                # NEW: Create environment from user's VM if none exists
+                                # LAZY PROVISIONING: Create environment from user's VM
                                 # ═══════════════════════════════════════════════════════════
                                 if not user_environments:
-                                    self.logger.info(f"No environments found for user {user_id_str}, attempting to create from VM metadata")
+                                    self.logger.info(f"No environments found for user {user_id_str}, checking VM status")
                                     
                                     # Get user data with VM info
                                     from ..core.database.user_repository import UserRepository
@@ -1687,12 +1687,18 @@ class MissionController:
                                     
                                     if user_data and user_data.get("metadata"):
                                         metadata = user_data["metadata"]
+                                        vm_status = metadata.get("vm_status")
                                         vm_ip = metadata.get("vm_ip")
                                         vm_ssh_user = metadata.get("vm_ssh_user", "root")
                                         vm_ssh_password = metadata.get("vm_ssh_password")
                                         vm_ssh_port = metadata.get("vm_ssh_port", 22)
                                         
-                                        if vm_ip and vm_ssh_password:
+                                        # ═══════════════════════════════════════════════════
+                                        # Case 1: VM is ready - create environment on-the-fly
+                                        # ═══════════════════════════════════════════════════
+                                        if vm_status == "ready" and vm_ip and vm_ssh_password:
+                                            self.logger.info(f"VM is ready, creating environment for user {user_id_str}")
+                                            
                                             # Create environment config
                                             from ..infrastructure.orchestrator import EnvironmentConfig, EnvironmentType
                                             from ..infrastructure.ssh import SSHConnectionConfig
@@ -1718,6 +1724,94 @@ class MissionController:
                                                 self.logger.info(f"Created and connected environment {agent_env.environment_id} for user {user_id_str}")
                                             except Exception as e:
                                                 self.logger.error(f"Failed to create environment on-the-fly: {e}")
+                                        
+                                        # ═══════════════════════════════════════════════════
+                                        # Case 2: VM not created yet - trigger lazy provisioning
+                                        # ═══════════════════════════════════════════════════
+                                        elif vm_status == "not_created":
+                                            self.logger.info(f"VM not created for user {user_id_str}, triggering lazy provisioning")
+                                            
+                                            # Start VM provisioning in background
+                                            from ..api.auth_routes import provision_user_vm, VMConfiguration
+                                            import asyncio
+                                            
+                                            # Update status to pending
+                                            try:
+                                                await user_repo.update(
+                                                    user_id_str,
+                                                    {"metadata": {"vm_status": "pending"}},
+                                                    user_data.get("organization_id")
+                                                )
+                                            except Exception as e:
+                                                self.logger.error(f"Failed to update VM status: {e}")
+                                            
+                                            # Start provisioning (non-blocking)
+                                            asyncio.create_task(provision_user_vm(
+                                                user_id_str,
+                                                str(user_data.get("organization_id")),
+                                                VMConfiguration(),
+                                                user_repo
+                                            ))
+                                            
+                                            self.logger.info(f"VM provisioning started for user {user_id_str}")
+                                        
+                                        # ═══════════════════════════════════════════════════
+                                        # Case 3: VM is stopped - wake it up
+                                        # ═══════════════════════════════════════════════════
+                                        elif vm_status == "stopped":
+                                            vm_id = metadata.get("vm_id")
+                                            if vm_id:
+                                                self.logger.info(f"VM is stopped, waking up VM {vm_id} for user {user_id_str}")
+                                                
+                                                # Start VM (this is a quick operation)
+                                                try:
+                                                    from ..infrastructure.cloud_provider.oneprovider_client import OneProviderClient
+                                                    from ..core.config import get_settings
+                                                    
+                                                    settings = get_settings()
+                                                    client = OneProviderClient(
+                                                        api_key=settings.oneprovider_api_key,
+                                                        client_key=settings.oneprovider_client_key,
+                                                    )
+                                                    
+                                                    await client.start_vm(vm_id)
+                                                    self.logger.info(f"VM {vm_id} started successfully")
+                                                    
+                                                    # Update status
+                                                    await user_repo.update(
+                                                        user_id_str,
+                                                        {"metadata": {"vm_status": "ready"}},
+                                                        user_data.get("organization_id")
+                                                    )
+                                                    
+                                                    # Wait a bit for VM to be ready
+                                                    await asyncio.sleep(10)
+                                                    
+                                                    # Now create environment
+                                                    if vm_ip and vm_ssh_password:
+                                                        from ..infrastructure.orchestrator import EnvironmentConfig, EnvironmentType
+                                                        from ..infrastructure.ssh import SSHConnectionConfig
+                                                        
+                                                        ssh_config = SSHConnectionConfig(
+                                                            host=vm_ip,
+                                                            port=vm_ssh_port,
+                                                            username=vm_ssh_user,
+                                                            password=vm_ssh_password
+                                                        )
+                                                        
+                                                        env_config = EnvironmentConfig(
+                                                            environment_type=EnvironmentType.REMOTE_SSH,
+                                                            name=f"User VM - {user_id_str[:8]}",
+                                                            ssh_config=ssh_config,
+                                                            user_id=user_id_str
+                                                        )
+                                                        
+                                                        agent_env = await self.environment_manager.create_environment(env_config)
+                                                        user_environments = [agent_env]
+                                                        self.logger.info(f"Environment created after VM wake-up")
+                                                        
+                                                except Exception as e:
+                                                    self.logger.error(f"Failed to wake up VM: {e}")
                                 
                                 if user_environments:
                                     # Use the first available connected environment
@@ -1775,10 +1869,34 @@ class MissionController:
             # ═══════════════════════════════════════════════════════════════
             
             if not executed_via_ssh:
+                # Check VM status to provide helpful message
+                vm_status_msg = ""
+                try:
+                    from ..core.database.user_repository import UserRepository
+                    user_repo = UserRepository(self.blackboard.redis)
+                    mission_data = await self.blackboard.get_mission(mission_id)
+                    if mission_data:
+                        user_id = mission_data.get("created_by")
+                        if user_id:
+                            user_data = await user_repo.get(str(user_id))
+                            if user_data and user_data.get("metadata"):
+                                vm_status = user_data["metadata"].get("vm_status")
+                                if vm_status == "not_created":
+                                    vm_status_msg = "💡 Your execution environment will be created when you create your first mission. Using simulation mode for now."
+                                elif vm_status in ["pending", "creating", "configuring"]:
+                                    vm_status_msg = "⏳ Your execution environment is being set up (5-10 minutes). Using simulation mode in the meantime."
+                                elif vm_status == "stopped":
+                                    vm_status_msg = "😴 Your VM is waking up. Using simulation mode temporarily."
+                except Exception:
+                    pass
+                
                 self.logger.info(f"Using simulation mode for command: {command}")
                 
+                # Add helpful message if we have VM status info
+                status_prefix = [vm_status_msg, ""] if vm_status_msg else []
+                
                 if command.startswith("ls"):
-                    output_lines = [
+                    output_lines = status_prefix + [
                         "total 24",
                         "drwxr-xr-x  4 root root 4096 Jan  6 12:00 .",
                         "drwxr-xr-x 10 root root 4096 Jan  6 12:00 ..",
@@ -1790,22 +1908,22 @@ class MissionController:
                         "[SIMULATION MODE - No VM environment configured]"
                     ]
                 elif command.startswith("pwd"):
-                    output_lines = ["/home/ubuntu/mission", "", "[SIMULATION MODE]"]
+                    output_lines = status_prefix + ["/home/ubuntu/mission", "", "[SIMULATION MODE]"]
                 elif command.startswith("whoami"):
-                    output_lines = ["ubuntu", "", "[SIMULATION MODE]"]
+                    output_lines = status_prefix + ["ubuntu", "", "[SIMULATION MODE]"]
                 elif command.startswith("id"):
-                    output_lines = ["uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),27(sudo)", "", "[SIMULATION MODE]"]
+                    output_lines = status_prefix + ["uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),27(sudo)", "", "[SIMULATION MODE]"]
                 elif command.startswith("uname"):
-                    output_lines = ["Linux raglox-sandbox 5.15.0-91-generic x86_64 GNU/Linux", "", "[SIMULATION MODE]"]
+                    output_lines = status_prefix + ["Linux raglox-sandbox 5.15.0-91-generic x86_64 GNU/Linux", "", "[SIMULATION MODE]"]
                 elif command.startswith("df"):
-                    output_lines = [
+                    output_lines = status_prefix + [
                         "Filesystem     1K-blocks    Used Available Use% Mounted on",
                         "/dev/sda1       50000000 5000000  45000000  10% /",
                         "",
                         "[SIMULATION MODE]"
                     ]
                 elif command.startswith("nmap"):
-                    output_lines = [
+                    output_lines = status_prefix + [
                         "Starting Nmap 7.94 ( https://nmap.org )",
                         "Nmap scan report for target",
                         "Host is up (0.0010s latency).",
@@ -1818,7 +1936,7 @@ class MissionController:
                         "[SIMULATION MODE]"
                     ]
                 elif command.startswith("cat"):
-                    output_lines = [
+                    output_lines = status_prefix + [
                         "# Configuration File",
                         "hostname=target-server",
                         "ip=192.168.1.100",
@@ -1826,7 +1944,7 @@ class MissionController:
                         "[SIMULATION MODE]"
                     ]
                 elif command.startswith("ps"):
-                    output_lines = [
+                    output_lines = status_prefix + [
                         "  PID TTY          TIME CMD",
                         "    1 ?        00:00:02 systemd",
                         " 1024 ?        00:00:00 sshd",
@@ -1835,7 +1953,7 @@ class MissionController:
                         "[SIMULATION MODE]"
                     ]
                 else:
-                    output_lines = [
+                    output_lines = status_prefix + [
                         f"Command '{command}' executed successfully",
                         "",
                         "[SIMULATION MODE - Configure VM environment for real execution]"
