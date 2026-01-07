@@ -104,7 +104,7 @@ class TestSettings:
         """Test knowledge base path default."""
         settings = Settings()
         
-        assert settings.knowledge_data_path == "/opt/raglox/data"
+        assert settings.knowledge_data_path == "data"
 
 
 class TestEnvironmentVariables:
@@ -136,11 +136,11 @@ class TestEnvironmentVariables:
     
     def test_jwt_secret_from_env(self):
         """Test JWT_SECRET from environment."""
-        os.environ["JWT_SECRET"] = "super-secret-key"
+        os.environ["JWT_SECRET"] = "super-secret-key-with-at-least-32-characters-for-security"
         
         settings = Settings()
         
-        assert settings.jwt_secret == "super-secret-key"
+        assert settings.jwt_secret == "super-secret-key-with-at-least-32-characters-for-security"
         
         # Cleanup
         del os.environ["JWT_SECRET"]
