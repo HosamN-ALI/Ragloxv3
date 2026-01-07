@@ -475,7 +475,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Use ShutdownManager for coordinated shutdown
     if shutdown_manager:
         logger.info("Initiating graceful shutdown via ShutdownManager...")
-        await shutdown_manager.shutdown_async()
+        await shutdown_manager.shutdown()
     else:
         # Fallback to manual shutdown
         logger.warning("ShutdownManager not available, using fallback shutdown")
