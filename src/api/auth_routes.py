@@ -490,29 +490,43 @@ async def provision_user_vm(
                 "metadata": {"vm_status": VMProvisionStatus.CONFIGURING.value}
             }, org_uuid)
             
-            # Poll for ready state
-            for _ in range(60):  # 5 minutes max
+            # Poll for ready state with IP assignment
+            # Wait initial time for VM to become available in API
+            await asyncio.sleep(15)  # Give OneProvider time to register the VM
+            
+            vm_ready = False
+            for attempt in range(60):  # 5 minutes max
                 await asyncio.sleep(5)
-                # Refresh VM instance to get updated status
-                vm_instance = await vm_manager.get_vm(vm_instance.vm_id)
-                if vm_instance and (vm_instance.ipv4 or vm_instance.ipv6):
-                    break
+                try:
+                    # Refresh VM instance to get updated status
+                    refreshed_vm = await vm_manager.get_vm(vm_instance.vm_id)
+                    if refreshed_vm and (refreshed_vm.ipv4 or refreshed_vm.ipv6):
+                        vm_instance = refreshed_vm
+                        vm_ready = True
+                        break
+                except Exception as e:
+                    # VM might not be available in API yet, continue waiting
+                    logger.debug(f"VM not yet available (attempt {attempt+1}/60): {e}")
+                    continue
             
-            # Update user with VM details including SSH credentials
-            # Note: In production, consider encrypting the password before storage
-            vm_ip = vm_instance.ipv4 or vm_instance.ipv6  # Use IPv4 if available, otherwise IPv6
-            await user_repo.update(user_uuid, {
-                "metadata": {
-                    "vm_status": VMProvisionStatus.READY.value,
-                    "vm_id": vm_instance.vm_id,
-                    "vm_ip": vm_ip,
-                    "vm_ssh_user": "root",  # Default SSH user for OneProvider VMs
-                    "vm_ssh_password": vm_password,  # Store password for SSH access
-                    "vm_ssh_port": 22,
-                }
-            }, org_uuid)
-            
-            logger.info(f"VM provisioned for user {user_id}: {vm_ip}")
+            if vm_ready:
+                # Update user with VM details including SSH credentials
+                # Note: In production, consider encrypting the password before storage
+                vm_ip = vm_instance.ipv4 or vm_instance.ipv6  # Use IPv4 if available, otherwise IPv6
+                await user_repo.update(user_uuid, {
+                    "metadata": {
+                        "vm_status": VMProvisionStatus.READY.value,
+                        "vm_id": vm_instance.vm_id,
+                        "vm_ip": vm_ip,
+                        "vm_ssh_user": "root",  # Default SSH user for OneProvider VMs
+                        "vm_ssh_password": vm_password,  # Store password for SSH access
+                        "vm_ssh_port": 22,
+                    }
+                }, org_uuid)
+                
+                logger.info(f"VM provisioned for user {user_id}: {vm_ip}")
+            else:
+                raise Exception("VM created but failed to get IP address within timeout")
         else:
             raise Exception("VM creation returned None")
             
