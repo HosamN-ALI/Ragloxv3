@@ -1,0 +1,63 @@
+
+🔍 RAGLOX V3 - Quick Database Validation
+======================================================================
+
+📋 Tables:
+  ✓ api_keys             (10 columns)
+  ✓ attack_paths         (15 columns)
+  ✓ audit_log            (11 columns)
+  ✓ credentials          (17 columns)
+  ✓ missions             (20 columns)
+  ✓ organizations        (4 columns)
+  ✓ reports              (13 columns)
+  ✓ sessions             (15 columns)
+  ✓ settings             (7 columns)
+  ✓ targets              (16 columns)
+  ✓ users                (12 columns)
+  ✓ vulnerabilities      (16 columns)
+
+📊 Record Counts:
+  api_keys            :      0 records
+  attack_paths        :      0 records
+  audit_log           :      1 records
+  credentials         :      0 records
+  missions            :      0 records
+  organizations       :      1 records
+  reports             :      0 records
+  sessions            :      0 records
+  settings            :     10 records
+  targets             :      0 records
+  users               :      1 records
+  vulnerabilities     :      0 records
+
+🔗 Foreign Keys:
+  ✓ api_keys.user_id → users.id
+  ✓ attack_paths.mission_id → missions.id
+  ✓ attack_paths.from_target_id → targets.id
+  ✓ attack_paths.to_target_id → targets.id
+  ✓ attack_paths.via_cred_id → credentials.id
+  ✓ audit_log.user_id → users.id
+  ✓ audit_log.organization_id → organizations.id
+  ✓ credentials.mission_id → missions.id
+  ✓ credentials.target_id → targets.id
+  ✓ missions.organization_id → organizations.id
+  ✓ missions.created_by → users.id
+  ✓ reports.generated_by → users.id
+  ✓ reports.mission_id → missions.id
+  ✓ sessions.target_id → targets.id
+  ✓ sessions.via_cred_id → credentials.id
+  ✓ sessions.via_vuln_id → vulnerabilities.id
+  ✓ sessions.mission_id → missions.id
+  ✓ settings.updated_by → users.id
+  ✓ targets.mission_id → missions.id
+  ✓ users.organization_id → organizations.id
+  ✓ vulnerabilities.target_id → targets.id
+  ✓ vulnerabilities.mission_id → missions.id
+
+📑 Indexes: 50 total
+
+======================================================================
+✅ Validation complete!
+📊 Total tables: 12
+🔗 Total foreign keys: 22
+

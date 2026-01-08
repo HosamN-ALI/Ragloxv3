@@ -1,0 +1,70 @@
+
+[1m[94m══════════════════════════════════════════════════════════════════════
+    RAGLOX V3 - Production Database Testing Suite
+══════════════════════════════════════════════════════════════════════[0m
+
+Database: localhost:5432/raglox
+Started: 2026-01-08 17:31:53 UTC
+
+
+[1m[94mTesting Organizations Table[0m
+  [92m✓ PASS[0m  INSERT organization
+         ID: 9798dad4-ccde-4d92-a428-efeddb178c42
+  [92m✓ PASS[0m  SELECT organization
+         Name: Test Org 1d9a8943
+
+[1m[94mTesting Users Table[0m
+  [92m✓ PASS[0m  INSERT user
+         ID: 3e8226dd-5269-4e13-927a-1c0b18baa188
+  [92m✓ PASS[0m  SELECT user with JOIN
+         User: Test User, Org: Test Org 1d9a8943
+
+[1m[94mTesting Missions Table[0m
+  [92m✓ PASS[0m  INSERT mission
+         ID: ea54acfe-5cd0-4075-898e-ec5560a000a4
+  [92m✓ PASS[0m  UPDATE mission
+         Status: running
+
+[1m[94mTesting Targets Table[0m
+  [92m✓ PASS[0m  INSERT target
+         ID: 765bd1da-c40a-40e2-9db8-7731eeaf8949
+  [92m✓ PASS[0m  JSONB query on ports
+         Service: "ssh"
+
+[1m[94mTesting Vulnerabilities Table[0m
+  [92m✓ PASS[0m  INSERT vulnerability
+         ID: 22e43b7e-190d-442f-9e31-013906241c2f
+
+[1m[94mTesting Credentials Table[0m
+  [92m✓ PASS[0m  INSERT credential
+         ID: 01a9a00e-e3ff-4b6b-93f8-b6fbadac26a9
+
+[1m[94mTesting Sessions Table[0m
+  [92m✓ PASS[0m  INSERT session
+         ID: b295b976-c01d-438a-9132-5a2589333230
+
+[1m[94mTesting Foreign Key Constraints[0m
+  [92m✓ PASS[0m  FK constraint enforcement
+         Correctly rejected invalid mission_id
+
+[1m[94mTesting Index Performance[0m
+  [91m✗ FAIL[0m  Email index usage
+         Sequential Scan (no index)
+
+[1m[94mTesting Triggers[0m
+  [92m✓ PASS[0m  updated_at trigger
+         Old: 2026-01-08 17:31:53.740134+00:00, New: 2026-01-08 17:31:53.860494+00:00
+
+[1m[94mCleaning Up Test Data[0m
+  [92m✓ PASS[0m  Cleanup test data
+         All test records removed
+
+[1m══════════════════════════════════════════════════════════════════════
+TEST SUMMARY
+══════════════════════════════════════════════════════════════════════[0m
+  Total Tests:  14
+  [92mPassed:       13[0m
+  [91mFailed:       1[0m
+  Pass Rate:    92.9%
+══════════════════════════════════════════════════════════════════════
+

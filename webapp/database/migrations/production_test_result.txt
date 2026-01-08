@@ -1,0 +1,75 @@
+
+[1m[94m══════════════════════════════════════════════════════════════════════
+    RAGLOX V3 - Production Database Testing Suite
+══════════════════════════════════════════════════════════════════════[0m
+
+Database: localhost:5432/raglox
+Started: 2026-01-08 17:30:36 UTC
+
+
+[1m[94mTesting Organizations Table[0m
+  [92m✓ PASS[0m  INSERT organization
+         ID: bc63e272-22f1-47eb-b603-075c7a0c62d6
+  [92m✓ PASS[0m  SELECT organization
+         Name: Test Org 1d12a9c8
+
+[1m[94mTesting Users Table[0m
+  [92m✓ PASS[0m  INSERT user
+         ID: 222d5d21-38c2-404e-8885-436514ea40b8
+  [92m✓ PASS[0m  SELECT user with JOIN
+         User: Test User, Org: Test Org 1d12a9c8
+
+[1m[94mTesting Missions Table[0m
+  [91m✗ FAIL[0m  INSERT mission
+         new row for relation "missions" violates check constraint "valid_status"
+DETAIL:  Failing row contains (754c7be4-c71d-4da7-8416-d5a0bf43d8f5, Test Mission 4e1f08f4, Testing mission, planning, {"targets": ["10.0.0.0/24"]}, [{"type": "recon", "description": "Test goal"}], {"no_dos": true}, 222d5d21-38c2-404e-8885-436514ea40b8, 2026-01-08 17:30:36.287492+00, null, null, 0, 0, 0, 0, 0, null, bc63e272-22f1-47eb-b603-075c7a0c62d6, 2026-01-08 17:30:36.287492+00, {}).
+  [91m✗ FAIL[0m  UPDATE mission
+         Status: None
+
+[1m[94mTesting Targets Table[0m
+  [91m✗ FAIL[0m  INSERT target
+         insert or update on table "targets" violates foreign key constraint "targets_mission_id_fkey"
+DETAIL:  Key (mission_id)=(754c7be4-c71d-4da7-8416-d5a0bf43d8f5) is not present in table "missions".
+  [91m✗ FAIL[0m  JSONB query on ports
+         Service: None
+
+[1m[94mTesting Vulnerabilities Table[0m
+  [91m✗ FAIL[0m  INSERT vulnerability
+         insert or update on table "vulnerabilities" violates foreign key constraint "vulnerabilities_mission_id_fkey"
+DETAIL:  Key (mission_id)=(754c7be4-c71d-4da7-8416-d5a0bf43d8f5) is not present in table "missions".
+
+[1m[94mTesting Credentials Table[0m
+  [91m✗ FAIL[0m  INSERT credential
+         insert or update on table "credentials" violates foreign key constraint "credentials_mission_id_fkey"
+DETAIL:  Key (mission_id)=(754c7be4-c71d-4da7-8416-d5a0bf43d8f5) is not present in table "missions".
+
+[1m[94mTesting Sessions Table[0m
+  [91m✗ FAIL[0m  INSERT session
+         insert or update on table "sessions" violates foreign key constraint "sessions_mission_id_fkey"
+DETAIL:  Key (mission_id)=(754c7be4-c71d-4da7-8416-d5a0bf43d8f5) is not present in table "missions".
+
+[1m[94mTesting Foreign Key Constraints[0m
+  [92m✓ PASS[0m  FK constraint enforcement
+         Correctly rejected invalid mission_id
+
+[1m[94mTesting Index Performance[0m
+  [91m✗ FAIL[0m  Email index usage
+         Sequential Scan (no index)
+
+[1m[94mTesting Triggers[0m
+  [91m✗ FAIL[0m  updated_at trigger
+         '>' not supported between instances of 'NoneType' and 'NoneType'
+
+[1m[94mCleaning Up Test Data[0m
+  [92m✓ PASS[0m  Cleanup test data
+         All test records removed
+
+[1m══════════════════════════════════════════════════════════════════════
+TEST SUMMARY
+══════════════════════════════════════════════════════════════════════[0m
+  Total Tests:  14
+  [92mPassed:       7[0m
+  [91mFailed:       7[0m
+  Pass Rate:    50.0%
+══════════════════════════════════════════════════════════════════════
+

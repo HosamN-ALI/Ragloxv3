@@ -1,0 +1,360 @@
+
+[1m[94m
+╔═══════════════════════════════════════════════════════════════════════════╗
+║              RAGLOX V3 - Database Validation Tool                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+[0m
+
+Database URL: localhost:5432/raglox
+Started: 2026-01-08 17:27:58
+
+[92m✓ Database connection established[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking PostgreSQL Extensions[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[92m✓ Extension 'uuid-ossp' is installed[0m
+[92m✓ Extension 'pgcrypto' is installed[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking Required Tables[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[92m✓ Table 'users' exists[0m
+[91m✗ Table 'organizations' is MISSING[0m
+[92m✓ Table 'missions' exists[0m
+[92m✓ Table 'targets' exists[0m
+[92m✓ Table 'vulnerabilities' exists[0m
+[92m✓ Table 'credentials' exists[0m
+[92m✓ Table 'sessions' exists[0m
+[92m✓ Table 'attack_paths' exists[0m
+[92m✓ Table 'reports' exists[0m
+[92m✓ Table 'api_keys' exists[0m
+[92m✓ Table 'settings' exists[0m
+[92m✓ Table 'audit_log' exists[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking Table Columns[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+
+[1mTable: users[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'email' exists (character varying)[0m
+[92m✓   Column 'password_hash' exists (character varying)[0m
+[91m✗   Column 'name' is MISSING[0m
+[91m✗   Column 'organization_id' is MISSING[0m
+[92m✓   Column 'is_active' exists (boolean)[0m
+[91m✗   Column 'is_superuser' is MISSING[0m
+[92m✓   Column 'created_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'updated_at' exists (timestamp with time zone)[0m
+[93m⚠   Unexpected columns: last_login, role, full_name[0m
+
+[1mTable: organizations[0m
+[91m✗   Column 'id' is MISSING[0m
+[91m✗   Column 'name' is MISSING[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+
+[1mTable: missions[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'name' exists (character varying)[0m
+[92m✓   Column 'description' exists (text)[0m
+[92m✓   Column 'status' exists (character varying)[0m
+[92m✓   Column 'scope' exists (jsonb)[0m
+[92m✓   Column 'goals' exists (jsonb)[0m
+[92m✓   Column 'constraints' exists (jsonb)[0m
+[92m✓   Column 'started_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'completed_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'targets_discovered' exists (integer)[0m
+[92m✓   Column 'vulns_found' exists (integer)[0m
+[92m✓   Column 'creds_harvested' exists (integer)[0m
+[92m✓   Column 'sessions_established' exists (integer)[0m
+[92m✓   Column 'goals_achieved' exists (integer)[0m
+[91m✗   Column 'organization_id' is MISSING[0m
+[92m✓   Column 'created_by' exists (uuid)[0m
+[92m✓   Column 'created_at' exists (timestamp with time zone)[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[91m✗   Column 'metadata' is MISSING[0m
+[93m⚠   Unexpected columns: final_state[0m
+
+[1mTable: targets[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'mission_id' exists (uuid)[0m
+[92m✓   Column 'ip' exists (inet)[0m
+[92m✓   Column 'hostname' exists (character varying)[0m
+[92m✓   Column 'os' exists (character varying)[0m
+[91m✗   Column 'os_version' is MISSING[0m
+[92m✓   Column 'status' exists (character varying)[0m
+[92m✓   Column 'priority' exists (character varying)[0m
+[92m✓   Column 'risk_score' exists (numeric)[0m
+[92m✓   Column 'discovered_by' exists (character varying)[0m
+[92m✓   Column 'discovered_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'ports' exists (jsonb)[0m
+[92m✓   Column 'services' exists (jsonb)[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[92m✓   Column 'metadata' exists (jsonb)[0m
+
+[1mTable: vulnerabilities[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'mission_id' exists (uuid)[0m
+[92m✓   Column 'target_id' exists (uuid)[0m
+[92m✓   Column 'type' exists (character varying)[0m
+[91m✗   Column 'name' is MISSING[0m
+[92m✓   Column 'description' exists (text)[0m
+[92m✓   Column 'severity' exists (character varying)[0m
+[92m✓   Column 'cvss' exists (numeric)[0m
+[92m✓   Column 'discovered_by' exists (character varying)[0m
+[92m✓   Column 'discovered_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'status' exists (character varying)[0m
+[92m✓   Column 'exploit_available' exists (boolean)[0m
+[92m✓   Column 'rx_modules' exists (jsonb)[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[92m✓   Column 'metadata' exists (jsonb)[0m
+
+[1mTable: credentials[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'mission_id' exists (uuid)[0m
+[92m✓   Column 'target_id' exists (uuid)[0m
+[92m✓   Column 'type' exists (character varying)[0m
+[92m✓   Column 'username' exists (character varying)[0m
+[92m✓   Column 'domain' exists (character varying)[0m
+[92m✓   Column 'value_encrypted' exists (bytea)[0m
+[92m✓   Column 'source' exists (character varying)[0m
+[92m✓   Column 'discovered_by' exists (character varying)[0m
+[92m✓   Column 'discovered_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'verified' exists (boolean)[0m
+[92m✓   Column 'privilege_level' exists (character varying)[0m
+[91m✗   Column 'reliability_score' is MISSING[0m
+[91m✗   Column 'source_metadata' is MISSING[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[92m✓   Column 'metadata' exists (jsonb)[0m
+
+[1mTable: sessions[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'mission_id' exists (uuid)[0m
+[92m✓   Column 'target_id' exists (uuid)[0m
+[92m✓   Column 'type' exists (character varying)[0m
+[91m✗   Column 'user' is MISSING[0m
+[92m✓   Column 'privilege' exists (character varying)[0m
+[92m✓   Column 'established_at' exists (timestamp with time zone)[0m
+[91m✗   Column 'last_activity' is MISSING[0m
+[92m✓   Column 'closed_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'status' exists (character varying)[0m
+[92m✓   Column 'via_vuln_id' exists (uuid)[0m
+[92m✓   Column 'via_cred_id' exists (uuid)[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[92m✓   Column 'metadata' exists (jsonb)[0m
+[93m⚠   Unexpected columns: username[0m
+
+[1mTable: attack_paths[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'mission_id' exists (uuid)[0m
+[92m✓   Column 'from_target_id' exists (uuid)[0m
+[92m✓   Column 'to_target_id' exists (uuid)[0m
+[91m✗   Column 'path' is MISSING[0m
+[92m✓   Column 'status' exists (character varying)[0m
+[91m✗   Column 'via_vulns' is MISSING[0m
+[91m✗   Column 'via_creds' is MISSING[0m
+[92m✓   Column 'discovered_at' exists (timestamp with time zone)[0m
+[91m✗   Column 'tested_at' is MISSING[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[92m✓   Column 'metadata' exists (jsonb)[0m
+[93m⚠   Unexpected columns: method, via_cred_id[0m
+
+[1mTable: reports[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'mission_id' exists (uuid)[0m
+[92m✓   Column 'type' exists (character varying)[0m
+[92m✓   Column 'format' exists (character varying)[0m
+[91m✗   Column 'content' is MISSING[0m
+[92m✓   Column 'generated_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'generated_by' exists (uuid)[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[92m✓   Column 'metadata' exists (jsonb)[0m
+[93m⚠   Unexpected columns: file_size, title, file_path[0m
+
+[1mTable: api_keys[0m
+[92m✓   Column 'id' exists (uuid)[0m
+[92m✓   Column 'user_id' exists (uuid)[0m
+[92m✓   Column 'key_hash' exists (character varying)[0m
+[92m✓   Column 'name' exists (character varying)[0m
+[92m✓   Column 'permissions' exists (jsonb)[0m
+[92m✓   Column 'expires_at' exists (timestamp with time zone)[0m
+[92m✓   Column 'last_used' exists (timestamp with time zone)[0m
+[92m✓   Column 'created_at' exists (timestamp with time zone)[0m
+[91m✗   Column 'updated_at' is MISSING[0m
+[93m⚠   Unexpected columns: is_active[0m
+
+[1mTable: settings[0m
+[92m✓   Column 'key' exists (character varying)[0m
+[92m✓   Column 'value' exists (jsonb)[0m
+[91m✗   Column 'type' is MISSING[0m
+[92m✓   Column 'description' exists (text)[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[92m✓   Column 'updated_at' exists (timestamp with time zone)[0m
+[93m⚠   Unexpected columns: updated_by[0m
+
+[1mTable: audit_log[0m
+[92m✓   Column 'id' exists (bigint)[0m
+[92m✓   Column 'user_id' exists (uuid)[0m
+[91m✗   Column 'organization_id' is MISSING[0m
+[92m✓   Column 'action' exists (character varying)[0m
+[92m✓   Column 'resource_type' exists (character varying)[0m
+[92m✓   Column 'resource_id' exists (uuid)[0m
+[91m✗   Column 'changes' is MISSING[0m
+[92m✓   Column 'ip_address' exists (inet)[0m
+[92m✓   Column 'user_agent' exists (text)[0m
+[91m✗   Column 'created_at' is MISSING[0m
+[93m⚠   Unexpected columns: details, success, timestamp[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking Primary Keys[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[92m✓ Table 'users' has correct PK: id[0m
+[91m✗ Table 'organizations' has NO primary key[0m
+[92m✓ Table 'missions' has correct PK: id[0m
+[92m✓ Table 'targets' has correct PK: id[0m
+[92m✓ Table 'vulnerabilities' has correct PK: id[0m
+[92m✓ Table 'credentials' has correct PK: id[0m
+[92m✓ Table 'sessions' has correct PK: id[0m
+[92m✓ Table 'attack_paths' has correct PK: id[0m
+[92m✓ Table 'reports' has correct PK: id[0m
+[92m✓ Table 'api_keys' has correct PK: id[0m
+[92m✓ Table 'settings' has correct PK: key[0m
+[92m✓ Table 'audit_log' has correct PK: id[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking Foreign Keys[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[91m✗ MISSING FK: missions.organization_id → organizations.id[0m
+[92m✓ missions.created_by → users.id[0m
+[92m✓ targets.mission_id → missions.id[0m
+[92m✓ vulnerabilities.mission_id → missions.id[0m
+[92m✓ vulnerabilities.target_id → targets.id[0m
+[92m✓ credentials.mission_id → missions.id[0m
+[92m✓ credentials.target_id → targets.id[0m
+[92m✓ sessions.mission_id → missions.id[0m
+[92m✓ sessions.target_id → targets.id[0m
+[92m✓ attack_paths.mission_id → missions.id[0m
+[92m✓ reports.mission_id → missions.id[0m
+[92m✓ reports.generated_by → users.id[0m
+[92m✓ api_keys.user_id → users.id[0m
+[92m✓ audit_log.user_id → users.id[0m
+[91m✗ MISSING FK: audit_log.organization_id → organizations.id[0m
+[96mℹ Found 13/15 expected foreign keys[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking Indexes[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[92m✓ Index on users.email[0m
+[93m⚠ Recommended index missing: users.organization_id[0m
+[92m✓ Index on missions.status[0m
+[93m⚠ Recommended index missing: missions.organization_id[0m
+[92m✓ Index on missions.created_by[0m
+[92m✓ Index on targets.mission_id[0m
+[92m✓ Index on targets.status[0m
+[92m✓ Index on targets.ip[0m
+[92m✓ Index on vulnerabilities.mission_id[0m
+[92m✓ Index on vulnerabilities.target_id[0m
+[92m✓ Index on vulnerabilities.severity[0m
+[93m⚠ Recommended index missing: vulnerabilities.status[0m
+[92m✓ Index on credentials.mission_id[0m
+[93m⚠ Recommended index missing: credentials.target_id[0m
+[93m⚠ Recommended index missing: credentials.username[0m
+[93m⚠ Recommended index missing: credentials.verified[0m
+[92m✓ Index on sessions.mission_id[0m
+[92m✓ Index on sessions.target_id[0m
+[93m⚠ Recommended index missing: sessions.status[0m
+[92m✓ Index on attack_paths.mission_id[0m
+[93m⚠ Recommended index missing: attack_paths.status[0m
+[92m✓ Index on reports.mission_id[0m
+[92m✓ Index on reports.type[0m
+[92m✓ Index on api_keys.user_id[0m
+[92m✓ Index on api_keys.key_hash[0m
+[92m✓ Index on audit_log.user_id[0m
+[93m⚠ Recommended index missing: audit_log.organization_id[0m
+[92m✓ Index on audit_log.action[0m
+[92m✓ Index on audit_log.resource_type[0m
+[93m⚠ Recommended index missing: audit_log.created_at[0m
+[93m⚠ Consider creating indexes on: users.organization_id, missions.organization_id, vulnerabilities.status, credentials.target_id, credentials.username, credentials.verified, sessions.status, attack_paths.status, audit_log.organization_id, audit_log.created_at[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking UUID Functions[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[92m✓ UUID generation working: 1b81af59-4f2a-47f5-a52b-7323cfcc4c07[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mChecking Data Integrity[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+[92m✓ users: No NULL primary keys[0m
+[93m⚠ Could not check organizations: relation "organizations" does not exist[0m
+[92m✓ missions: No NULL primary keys[0m
+[92m✓ targets: No NULL primary keys[0m
+[92m✓ vulnerabilities: No NULL primary keys[0m
+[92m✓ credentials: No NULL primary keys[0m
+[92m✓ sessions: No NULL primary keys[0m
+[92m✓ attack_paths: No NULL primary keys[0m
+[92m✓ reports: No NULL primary keys[0m
+[92m✓ api_keys: No NULL primary keys[0m
+[92m✓ settings: No NULL primary keys[0m
+[92m✓ audit_log: No NULL primary keys[0m
+[92m✓ No orphaned records in missions.created_by[0m
+[92m✓ No orphaned records in targets.mission_id[0m
+[92m✓ No orphaned records in vulnerabilities.mission_id[0m
+[92m✓ No orphaned records in credentials.mission_id[0m
+[92m✓ No orphaned records in sessions.mission_id[0m
+
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+[1m[94mTable Statistics[0m
+[94m════════════════════════════════════════════════════════════════════════════════[0m
+
+Traceback (most recent call last):
+  File "/root/RAGLOX_V3/webapp/webapp/database/migrations/06_validate_production_db.py", line 643, in <module>
+    asyncio.run(main())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/database/migrations/06_validate_production_db.py", line 637, in main
+    exit_code = await validator.run_all_checks()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/database/migrations/06_validate_production_db.py", line 607, in run_all_checks
+    await self.get_table_stats()
+  File "/root/RAGLOX_V3/webapp/webapp/database/migrations/06_validate_production_db.py", line 517, in get_table_stats
+    rows = await self.conn.fetch(query)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/venv_migration/lib/python3.12/site-packages/asyncpg/connection.py", line 694, in fetch
+    return await self._execute(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/venv_migration/lib/python3.12/site-packages/asyncpg/connection.py", line 1873, in _execute
+    result, _ = await self.__execute(
+                ^^^^^^^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/venv_migration/lib/python3.12/site-packages/asyncpg/connection.py", line 1970, in __execute
+    result, stmt = await self._do_execute(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/venv_migration/lib/python3.12/site-packages/asyncpg/connection.py", line 2013, in _do_execute
+    stmt = await self._get_statement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/RAGLOX_V3/webapp/webapp/venv_migration/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
+    statement = await self._protocol.prepare(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
+asyncpg.exceptions.UndefinedColumnError: column "tablename" does not exist
