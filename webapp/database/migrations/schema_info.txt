@@ -1,0 +1,157 @@
+   table_name    |     column_name      |        data_type         | is_nullable |            column_default             
+-----------------+----------------------+--------------------------+-------------+---------------------------------------
+ active_missions | id                   | uuid                     | YES         | 
+ active_missions | name                 | character varying        | YES         | 
+ active_missions | description          | text                     | YES         | 
+ active_missions | status               | character varying        | YES         | 
+ active_missions | scope                | jsonb                    | YES         | 
+ active_missions | goals                | jsonb                    | YES         | 
+ active_missions | constraints          | jsonb                    | YES         | 
+ active_missions | created_by           | uuid                     | YES         | 
+ active_missions | created_at           | timestamp with time zone | YES         | 
+ active_missions | started_at           | timestamp with time zone | YES         | 
+ active_missions | completed_at         | timestamp with time zone | YES         | 
+ active_missions | targets_discovered   | integer                  | YES         | 
+ active_missions | vulns_found          | integer                  | YES         | 
+ active_missions | creds_harvested      | integer                  | YES         | 
+ active_missions | sessions_established | integer                  | YES         | 
+ active_missions | goals_achieved       | integer                  | YES         | 
+ active_missions | final_state          | jsonb                    | YES         | 
+ active_missions | created_by_email     | character varying        | YES         | 
+ active_missions | current_targets      | bigint                   | YES         | 
+ active_missions | current_vulns        | bigint                   | YES         | 
+ api_keys        | id                   | uuid                     | NO          | uuid_generate_v4()
+ api_keys        | user_id              | uuid                     | YES         | 
+ api_keys        | key_hash             | character varying        | NO          | 
+ api_keys        | name                 | character varying        | YES         | 
+ api_keys        | permissions          | jsonb                    | YES         | '[]'::jsonb
+ api_keys        | expires_at           | timestamp with time zone | YES         | 
+ api_keys        | created_at           | timestamp with time zone | YES         | now()
+ api_keys        | last_used            | timestamp with time zone | YES         | 
+ api_keys        | is_active            | boolean                  | YES         | true
+ attack_paths    | id                   | uuid                     | NO          | 
+ attack_paths    | mission_id           | uuid                     | YES         | 
+ attack_paths    | from_target_id       | uuid                     | YES         | 
+ attack_paths    | to_target_id         | uuid                     | YES         | 
+ attack_paths    | method               | character varying        | YES         | 
+ attack_paths    | via_cred_id          | uuid                     | YES         | 
+ attack_paths    | discovered_at        | timestamp with time zone | YES         | 
+ attack_paths    | status               | character varying        | YES         | 
+ attack_paths    | metadata             | jsonb                    | YES         | '{}'::jsonb
+ audit_log       | id                   | bigint                   | NO          | nextval('audit_log_id_seq'::regclass)
+ audit_log       | timestamp            | timestamp with time zone | YES         | now()
+ audit_log       | user_id              | uuid                     | YES         | 
+ audit_log       | action               | character varying        | NO          | 
+ audit_log       | resource_type        | character varying        | YES         | 
+ audit_log       | resource_id          | uuid                     | YES         | 
+ audit_log       | details              | jsonb                    | YES         | 
+ audit_log       | ip_address           | inet                     | YES         | 
+ audit_log       | user_agent           | text                     | YES         | 
+ audit_log       | success              | boolean                  | YES         | true
+ credentials     | id                   | uuid                     | NO          | 
+ credentials     | mission_id           | uuid                     | YES         | 
+ credentials     | target_id            | uuid                     | YES         | 
+ credentials     | type                 | character varying        | NO          | 
+ credentials     | username             | character varying        | YES         | 
+ credentials     | domain               | character varying        | YES         | 
+ credentials     | value_encrypted      | bytea                    | NO          | 
+ credentials     | source               | character varying        | YES         | 
+ credentials     | discovered_at        | timestamp with time zone | YES         | 
+ credentials     | discovered_by        | character varying        | YES         | 
+ credentials     | verified             | boolean                  | YES         | false
+ credentials     | privilege_level      | character varying        | YES         | 
+ credentials     | metadata             | jsonb                    | YES         | '{}'::jsonb
+ mission_summary | id                   | uuid                     | YES         | 
+ mission_summary | name                 | character varying        | YES         | 
+ mission_summary | status               | character varying        | YES         | 
+ mission_summary | created_at           | timestamp with time zone | YES         | 
+ mission_summary | started_at           | timestamp with time zone | YES         | 
+ mission_summary | completed_at         | timestamp with time zone | YES         | 
+ mission_summary | targets_discovered   | integer                  | YES         | 
+ mission_summary | vulns_found          | integer                  | YES         | 
+ mission_summary | creds_harvested      | integer                  | YES         | 
+ mission_summary | sessions_established | integer                  | YES         | 
+ mission_summary | goals_achieved       | integer                  | YES         | 
+ mission_summary | created_by_email     | character varying        | YES         | 
+ mission_summary | duration_hours       | numeric                  | YES         | 
+ missions        | id                   | uuid                     | NO          | 
+ missions        | name                 | character varying        | NO          | 
+ missions        | description          | text                     | YES         | 
+ missions        | status               | character varying        | NO          | 
+ missions        | scope                | jsonb                    | NO          | 
+ missions        | goals                | jsonb                    | NO          | 
+ missions        | constraints          | jsonb                    | YES         | '{}'::jsonb
+ missions        | created_by           | uuid                     | YES         | 
+ missions        | created_at           | timestamp with time zone | NO          | 
+ missions        | started_at           | timestamp with time zone | YES         | 
+ missions        | completed_at         | timestamp with time zone | YES         | 
+ missions        | targets_discovered   | integer                  | YES         | 0
+ missions        | vulns_found          | integer                  | YES         | 0
+ missions        | creds_harvested      | integer                  | YES         | 0
+ missions        | sessions_established | integer                  | YES         | 0
+ missions        | goals_achieved       | integer                  | YES         | 0
+ missions        | final_state          | jsonb                    | YES         | 
+ reports         | id                   | uuid                     | NO          | uuid_generate_v4()
+ reports         | mission_id           | uuid                     | YES         | 
+ reports         | type                 | character varying        | NO          | 
+ reports         | format               | character varying        | NO          | 
+ reports         | title                | character varying        | YES         | 
+ reports         | generated_at         | timestamp with time zone | YES         | now()
+ reports         | generated_by         | uuid                     | YES         | 
+ reports         | file_path            | character varying        | YES         | 
+ reports         | file_size            | bigint                   | YES         | 
+ reports         | metadata             | jsonb                    | YES         | '{}'::jsonb
+ sessions        | id                   | uuid                     | NO          | 
+ sessions        | mission_id           | uuid                     | YES         | 
+ sessions        | target_id            | uuid                     | YES         | 
+ sessions        | type                 | character varying        | NO          | 
+ sessions        | username             | character varying        | YES         | 
+ sessions        | privilege            | character varying        | YES         | 
+ sessions        | established_at       | timestamp with time zone | YES         | 
+ sessions        | closed_at            | timestamp with time zone | YES         | 
+ sessions        | status               | character varying        | YES         | 
+ sessions        | via_vuln_id          | uuid                     | YES         | 
+ sessions        | via_cred_id          | uuid                     | YES         | 
+ sessions        | metadata             | jsonb                    | YES         | '{}'::jsonb
+ settings        | key                  | character varying        | NO          | 
+ settings        | value                | jsonb                    | NO          | 
+ settings        | description          | text                     | YES         | 
+ settings        | updated_at           | timestamp with time zone | YES         | now()
+ settings        | updated_by           | uuid                     | YES         | 
+ targets         | id                   | uuid                     | NO          | 
+ targets         | mission_id           | uuid                     | YES         | 
+ targets         | ip                   | inet                     | NO          | 
+ targets         | hostname             | character varying        | YES         | 
+ targets         | os                   | character varying        | YES         | 
+ targets         | status               | character varying        | YES         | 
+ targets         | priority             | character varying        | YES         | 
+ targets         | risk_score           | numeric                  | YES         | 
+ targets         | discovered_at        | timestamp with time zone | YES         | 
+ targets         | discovered_by        | character varying        | YES         | 
+ targets         | ports                | jsonb                    | YES         | '{}'::jsonb
+ targets         | services             | jsonb                    | YES         | '[]'::jsonb
+ targets         | metadata             | jsonb                    | YES         | '{}'::jsonb
+ users           | id                   | uuid                     | NO          | uuid_generate_v4()
+ users           | email                | character varying        | NO          | 
+ users           | password_hash        | character varying        | NO          | 
+ users           | full_name            | character varying        | YES         | 
+ users           | role                 | character varying        | NO          | 'operator'::character varying
+ users           | is_active            | boolean                  | YES         | true
+ users           | created_at           | timestamp with time zone | YES         | now()
+ users           | updated_at           | timestamp with time zone | YES         | now()
+ users           | last_login           | timestamp with time zone | YES         | 
+ vulnerabilities | id                   | uuid                     | NO          | 
+ vulnerabilities | mission_id           | uuid                     | YES         | 
+ vulnerabilities | target_id            | uuid                     | YES         | 
+ vulnerabilities | type                 | character varying        | NO          | 
+ vulnerabilities | severity             | character varying        | NO          | 
+ vulnerabilities | cvss                 | numeric                  | YES         | 
+ vulnerabilities | description          | text                     | YES         | 
+ vulnerabilities | status               | character varying        | YES         | 
+ vulnerabilities | discovered_at        | timestamp with time zone | YES         | 
+ vulnerabilities | discovered_by        | character varying        | YES         | 
+ vulnerabilities | exploit_available    | boolean                  | YES         | false
+ vulnerabilities | rx_modules           | jsonb                    | YES         | '[]'::jsonb
+ vulnerabilities | metadata             | jsonb                    | YES         | '{}'::jsonb
+(153 rows)
+

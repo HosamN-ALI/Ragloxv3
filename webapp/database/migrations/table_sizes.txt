@@ -1,0 +1,15 @@
+ schemaname |    tablename    | size  
+------------+-----------------+-------
+ public     | audit_log       | 96 kB
+ public     | users           | 80 kB
+ public     | vulnerabilities | 48 kB
+ public     | missions        | 40 kB
+ public     | targets         | 40 kB
+ public     | settings        | 32 kB
+ public     | sessions        | 32 kB
+ public     | reports         | 32 kB
+ public     | api_keys        | 32 kB
+ public     | credentials     | 32 kB
+ public     | attack_paths    | 24 kB
+(11 rows)
+
